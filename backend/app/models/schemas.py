@@ -28,6 +28,7 @@ class QuizGenerateRequest(BaseModel):
     subject: str = "physics"
     numQuestions: int = 5
     timeLimit: Optional[int] = None # in minutes
+    difficulty: Optional[str] = None # 'easy' | 'medium' | 'hard'
 
 class QuizSubmitRequest(BaseModel):
     quizId: str

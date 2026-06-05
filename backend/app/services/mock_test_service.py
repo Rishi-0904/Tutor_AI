@@ -10,9 +10,11 @@ def get_mock_test_questions(subject: str, num_questions: int = 10):
     global _jee_df
     
     if _jee_df is None:
-        csv_path = r"C:\Users\rishi\Downloads\tutor_ai_model\preprocessing\jee_data_all.csv"
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        project_root = os.path.dirname(base_dir)
+        csv_path = os.path.join(project_root, "preprocessing", "jee_data_all.csv")
         try:
-            print("[MockTest] Loading JEE Dataset with topics...")
+            print(f"[MockTest] Loading JEE Dataset from {csv_path}...")
             # Load more columns for better context
             _jee_df = pd.read_csv(csv_path, usecols=[
                 'question_id', 'subject', 'chapter', 'topic', 

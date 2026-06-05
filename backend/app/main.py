@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import chat, quiz, profile, ocr
+from app.routers import chat, quiz, profile, ocr, roadmap, analytics
 from app.core.config import settings
 from contextlib import asynccontextmanager
 from app.services.llm_service import load_models
@@ -10,10 +10,23 @@ from starlette.responses import JSONResponse
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Model loading is now lazy (handled on first chat request) 
-    # to prevent startup resource starvation and SSL timeouts.
-    print("Application started. Models will be loaded on demand.")
+    print("Connecting to TutorAI Internal Profile & Vector MCP Server...")
+    from app.services.mcp_service import mcp_service
+    # Spawn and connect to internal FastMCP server
+    success = await mcp_service.connect_to_server(
+        "tutor_mcp",
+        "python",
+        ["-m", "app.mcp_servers.tutor_mcp_server"]
+    )
+    if success:
+        print("[Lifespan] MCP connection established successfully.")
+    else:
+        print("[Lifespan] Failed to connect to internal MCP server.")
+        
     yield
+    
+    print("[Lifespan] Disconnecting all active MCP connections...")
+    await mcp_service.disconnect_all()
 
 app = FastAPI(
     title="TutorAI API",
@@ -41,6 +54,8 @@ app.include_router(chat.router)
 app.include_router(quiz.router)
 app.include_router(profile.router)
 app.include_router(ocr.router)
+app.include_router(roadmap.router)
+app.include_router(analytics.router)
 
 @app.get("/health")
 async def health():

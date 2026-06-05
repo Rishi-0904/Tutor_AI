@@ -3,16 +3,23 @@ from typing import Dict, Any
 from app.models.schemas import UserInfo, QuizGenerateRequest, QuizSubmitRequest, QuizSubmitResponse
 from app.middleware.auth import get_current_user
 from app.core.supabase_client import supabase
-from app.services.weakness_service import get_top_weak_topics
-from app.services.mock_test_service import get_mock_test_questions
+from app.services.quiz_service import generate_adaptive_quiz
 from datetime import datetime
 
 router = APIRouter(prefix="/quiz", tags=["quiz"])
 
 @router.post("/generate")
 async def generate_quiz_endpoint(req: QuizGenerateRequest, user: UserInfo = Depends(get_current_user)):
-    weak_topics = get_top_weak_topics(user.id, req.subject, n=3)
-    questions = get_mock_test_questions(req.subject, req.numQuestions)
+    quiz_data = generate_adaptive_quiz(
+        user_id=user.id,
+        subject=req.subject,
+        num_questions=req.numQuestions,
+        manual_difficulty=req.difficulty
+    )
+    
+    questions = quiz_data.get("questions", [])
+    difficulty = quiz_data.get("difficulty", "medium")
+    weak_topics = quiz_data.get("weak_topics", [])
     
     if not questions:
         raise HTTPException(status_code=500, detail="Failed to load questions from dataset")
@@ -33,6 +40,7 @@ async def generate_quiz_endpoint(req: QuizGenerateRequest, user: UserInfo = Depe
         "id": attempt["id"],
         "subject": req.subject,
         "weakTopics": weak_topics,
+        "difficulty": difficulty,
         "questions": questions,
         "timeLimit": time_limit
     }

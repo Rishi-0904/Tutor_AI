@@ -38,15 +38,19 @@ def save_user_message(conversation_id: str, user_id: str, content: str = None,
     }).execute()
     return res.data[0] if res.data else None
 
-def save_assistant_message(conversation_id: str, user_id: str, content: str, topic_tags: list = None):
+def save_assistant_message(conversation_id: str, user_id: str, content: str, topic_tags: list = None, is_correct: bool = None):
     topic_tags = topic_tags or []
-    res = supabase.table('messages').insert({
+    payload = {
         'conversation_id': conversation_id,
         'user_id': user_id,
         'role': 'assistant',
         'content': content,
         'topic_tags': topic_tags
-    }).execute()
+    }
+    if is_correct is not None:
+        payload['is_correct'] = is_correct
+
+    res = supabase.table('messages').insert(payload).execute()
     
     supabase.table('conversations').update({'updated_at': datetime.utcnow().isoformat()}).eq('id', conversation_id).execute()
     

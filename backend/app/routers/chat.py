@@ -8,6 +8,8 @@ from app.core.supabase_client import supabase
 from app.services.history_service import get_conversation_history, save_user_message, save_assistant_message
 from app.services.llm_service import generate_answer, generate_answer_stream, format_question_latex, process_image_with_gemini
 from app.services.ocr_service import extract_text_from_image
+from app.services.agent_service import run_agent_stream
+from app.services.storage_service import upload_image_to_supabase
 import json
 
 router = APIRouter(tags=["chat"])
@@ -60,17 +62,44 @@ async def chat(
     
     # Process Image if present
     full_content = content
+    image_url = None
+    extracted_text = None
     if image:
         image_bytes = await image.read()
         extracted_text = await run_in_threadpool(process_image_with_gemini, image_bytes=image_bytes)
+        
+        # Fallback to local OCR if Gemini fails
+        if extracted_text.startswith("Error:"):
+            print(f"[Chat] Gemini Vision failed, falling back to local OCR...")
+            extracted_text = await run_in_threadpool(extract_text_from_image, image_bytes=image_bytes)
+            
         full_content = f"{content}\n\n[Extracted from Image]:\n{extracted_text}" if content else extracted_text
+        image_url = await run_in_threadpool(upload_image_to_supabase, image_bytes=image_bytes, file_name=image.filename)
 
-    # Process AI in threadpool to avoid blocking
-    ai_result = await run_in_threadpool(generate_answer, question=full_content, history=history, subject=subject)
+    formatted_content = await run_in_threadpool(format_question_latex, question=full_content)
     
-    user_msg = save_user_message(conversation_id=conversationId, user_id=user.id, content=full_content)
-    ai_msg = save_assistant_message(conversation_id=conversationId, user_id=user.id, 
-                                    content=ai_result["answer"], topic_tags=ai_result.get("topic_tags", []))
+    user_msg = save_user_message(
+        conversation_id=conversationId, 
+        user_id=user.id, 
+        content=formatted_content,
+        image_url=image_url,
+        image_ocr_text=extracted_text
+    )
+    
+    # Execute agent
+    ai_content = ""
+    async for chunk in run_agent_stream(
+        conversation_id=conversationId,
+        user_id=user.id,
+        message=formatted_content,
+        subject=subject,
+        history=history
+    ):
+        ai_content += chunk
+        
+    # Retrieve the saved message from database
+    res = supabase.table('messages').select('*').eq('conversation_id', conversationId).eq('role', 'assistant').order('created_at', desc=True).limit(1).execute()
+    ai_msg = res.data[0] if res.data else {"role": "assistant", "content": ai_content, "topic_tags": []}
     
     return ChatResponse(userMessage=user_msg, aiMessage=ai_msg)
 
@@ -95,6 +124,8 @@ async def chat_stream(
     
     # Process Image if present
     full_content = content
+    image_url = None
+    extracted_text = None
     if image:
         image_bytes = await image.read()
         extracted_text = await run_in_threadpool(process_image_with_gemini, image_bytes=image_bytes)
@@ -105,37 +136,28 @@ async def chat_stream(
             extracted_text = await run_in_threadpool(extract_text_from_image, image_bytes=image_bytes)
             
         full_content = f"{content}\n\n[Extracted from Image]:\n{extracted_text}" if content else extracted_text
+        image_url = await run_in_threadpool(upload_image_to_supabase, image_bytes=image_bytes, file_name=image.filename)
 
     formatted_content = await run_in_threadpool(format_question_latex, question=full_content)
     
-    save_user_message(conversation_id=conversationId, user_id=user.id, content=formatted_content)
+    save_user_message(
+        conversation_id=conversationId, 
+        user_id=user.id, 
+        content=formatted_content,
+        image_url=image_url,
+        image_ocr_text=extracted_text
+    )
     
     async def event_generator():
         try:
-            # Let the user know the local model is working
-            yield f"data: {json.dumps({'content': '*(Generating answer natively... please wait)*\\n\\n'})}\n\n"
-            
-            # Fetch raw answer from local huggingface model (in threadpool to avoid blocking event loop)
-            ai_result = await run_in_threadpool(generate_answer, question=formatted_content, history=history, subject=subject)
-            raw_answer = ai_result.get("answer", "")
-            topic_tags = ai_result.get("topic_tags", [])
-
-            # Clear the loading message by formatting it as part of the structure (or just let Gemini format stream append)
-            # We'll just stream the formatted version below it
-            yield f"data: {json.dumps({'content': '---\\n\\n'})}\n\n"
-            
-            full_response = "*(Generating answer natively... please wait)*\n\n---\n\n"
-            
-            for chunk in generate_answer_stream(formatted_content, history, subject, raw_answer):
-                full_response += chunk
+            async for chunk in run_agent_stream(
+                conversation_id=conversationId,
+                user_id=user.id,
+                message=formatted_content,
+                subject=subject,
+                history=history
+            ):
                 yield f"data: {json.dumps({'content': chunk})}\n\n"
-                
-            save_assistant_message(
-                conversation_id=conversationId, 
-                user_id=user.id, 
-                content=full_response, 
-                topic_tags=topic_tags
-            )
             yield "data: [DONE]\n\n"
             
         except Exception as e:
@@ -144,4 +166,40 @@ async def chat_stream(
             yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+from pydantic import BaseModel
+
+class SaveSketchRequest(BaseModel):
+    conversationId: str
+    title: str
+    svgData: str
+
+@router.post("/conversations/sketch")
+async def save_sketch_endpoint(
+    req: SaveSketchRequest,
+    user: UserInfo = Depends(get_current_user)
+):
+    from app.services.mcp_service import mcp_service
+    res = await mcp_service.save_sketch(
+        user_id=user.id,
+        conversation_id=req.conversationId,
+        title=req.title,
+        svg_data=req.svgData
+    )
+    if not res.get("success"):
+        raise HTTPException(status_code=500, detail=res.get("error", "Failed to save sketch"))
+    return res
+
+@router.get("/conversations/{conversation_id}/sketches")
+async def get_sketches_endpoint(
+    conversation_id: str,
+    user: UserInfo = Depends(get_current_user)
+):
+    from app.services.mcp_service import mcp_service
+    sketches = await mcp_service.load_sketches(
+        user_id=user.id,
+        conversation_id=conversation_id
+    )
+    return sketches
 
