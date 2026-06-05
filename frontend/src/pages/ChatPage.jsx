@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { useChat } from '../hooks/useChat'
 import ConversationList from '../components/chat/ConversationList'
 import ChatWindow from '../components/chat/ChatWindow'
 import MessageInput from '../components/chat/MessageInput'
 import SubjectBadge from '../components/shared/SubjectBadge'
+import WhiteboardDrawer from '../components/chat/WhiteboardDrawer'
+import API from '../lib/api'
 import toast from 'react-hot-toast'
 
 export default function ChatPage() {
@@ -14,6 +16,7 @@ export default function ChatPage() {
   } = useChat()
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [ocrPrefill, setOcrPrefill] = useState('')
+  const [whiteboardOpen, setWhiteboardOpen] = useState(false)
 
   useEffect(() => {
     fetchConversations()
@@ -33,6 +36,25 @@ export default function ChatPage() {
       return
     }
     await sendMessage({ conversationId: activeConversation.id, content, imageFile })
+  }
+
+  const handleUploadPdf = async (file) => {
+    if (!activeConversation) return
+    const formData = new FormData()
+    formData.append('file', file)
+    
+    const loadingToast = toast.loading('Uploading and indexing PDF notes...')
+    try {
+      await API.post('/ocr/pdf/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      toast.dismiss(loadingToast)
+      toast.success('PDF uploaded successfully! Indexing is running in background.')
+    } catch (err) {
+      toast.dismiss(loadingToast)
+      toast.error('Failed to upload PDF notes')
+      console.error(err)
+    }
   }
 
   return (
@@ -63,6 +85,12 @@ export default function ChatPage() {
           {activeConversation ? (
             <>
               <p className="text-base font-medium truncate flex-1 text-slate-200 tracking-wide">{activeConversation.title}</p>
+              <button 
+                onClick={() => setWhiteboardOpen((p) => !p)}
+                className="mr-2 px-3 py-1.5 bg-white/5 hover:bg-brand-500/20 border border-white/10 hover:border-brand-500/30 text-slate-300 hover:text-brand-300 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all duration-300 shadow-sm"
+              >
+                ✏️ Whiteboard
+              </button>
               <SubjectBadge subject={activeConversation.subject} />
             </>
           ) : (
@@ -71,9 +99,22 @@ export default function ChatPage() {
         </div>
         <ChatWindow messages={messages} sending={sending} />
         <div className="bg-gradient-to-t from-slate-950 to-transparent pt-4 pb-0 mb-0">
-          <MessageInput onSend={handleSend} disabled={sending || !activeConversation} />
+          <MessageInput 
+            onSend={handleSend} 
+            onUploadPdf={handleUploadPdf} 
+            disabled={sending || !activeConversation} 
+          />
         </div>
       </div>
+      <AnimatePresence>
+        {whiteboardOpen && activeConversation && (
+          <WhiteboardDrawer
+            isOpen={whiteboardOpen}
+            onClose={() => setWhiteboardOpen(false)}
+            conversationId={activeConversation.id}
+          />
+        )}
+      </AnimatePresence>
     </div>
   )
 }

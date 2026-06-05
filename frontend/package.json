@@ -12,16 +12,17 @@
     "@supabase/supabase-js": "^2.43.4",
     "axios": "^1.7.2",
     "framer-motion": "^11.2.10",
+    "katex": "^0.16.10",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.23.1",
     "react-hot-toast": "^2.4.1",
-    "zustand": "^4.5.2",
     "react-icons": "^5.2.1",
     "react-markdown": "^9.0.1",
-    "remark-math": "^6.0.0",
+    "react-router-dom": "^6.23.1",
+    "reactflow": "^11.11.4",
     "rehype-katex": "^7.0.0",
-    "katex": "^0.16.10"
+    "remark-math": "^6.0.0",
+    "zustand": "^4.5.2"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

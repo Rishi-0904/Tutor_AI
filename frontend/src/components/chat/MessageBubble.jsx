@@ -2,6 +2,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import useAuthStore from '../../store/authStore'
+import VisualizerContainer from '../visualizer/VisualizerContainer'
 
 export default function MessageBubble({ message }) {
   const user = useAuthStore((s) => s.user)
@@ -52,14 +53,20 @@ export default function MessageBubble({ message }) {
                 rehypePlugins={[rehypeKatex]}
                 components={{
                   p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                  code: ({ inline, children }) =>
-                    inline ? (
+                  code: ({ inline, className, children }) => {
+                    const match = /language-(\w+)/.exec(className || '')
+                    const lang = match ? match[1] : ''
+                    if (!inline && ['visualizer_chart', 'visualizer_flow', 'visualizer_dp'].includes(lang)) {
+                      return <VisualizerContainer type={lang} data={children} />
+                    }
+                    return inline ? (
                       <code className="bg-white/10 text-green-300 px-1.5 py-0.5 rounded text-xs font-mono">{children}</code>
                     ) : (
                       <pre className="bg-surface-900 border border-white/10 rounded-lg p-3 my-2 overflow-x-auto text-xs font-mono text-slate-300">
                         <code>{children}</code>
                       </pre>
-                    ),
+                    )
+                  },
                   strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
                 }}
               >

@@ -9,12 +9,13 @@ import ChatPage from './pages/ChatPage'
 import QuizPage from './pages/QuizPage'
 import OCRPage from './pages/OCRPage'
 import ProfilePage from './pages/ProfilePage'
+import AnalyticsPage from './pages/AnalyticsPage'
 
 function AppLayout({ children }) {
   return (
-    <div className="h-screen flex flex-col bg-surface-900 overflow-hidden">
+    <div className="h-screen flex flex-row bg-[#080b14] overflow-hidden">
       <Navbar />
-      <main className="flex-1 flex overflow-hidden">
+      <main className="flex-1 flex overflow-hidden min-w-0">
         {children}
       </main>
     </div>
@@ -66,6 +67,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <AppLayout><ProfilePage /></AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/analytics"
+            element={
+              <ProtectedRoute>
+                <AppLayout><AnalyticsPage /></AppLayout>
               </ProtectedRoute>
             }
           />

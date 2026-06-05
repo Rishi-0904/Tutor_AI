@@ -1,12 +1,26 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
-export default function MessageInput({ onSend, disabled, initialText = '' }) {
+export default function MessageInput({ onSend, onUploadPdf, disabled, initialText = '' }) {
   const [text, setText] = useState('')
   const [imageFile, setImageFile] = useState(null)
   const [imagePreview, setImagePreview] = useState(null)
   const fileRef = useRef(null)
+  const pdfRef = useRef(null)
   const textareaRef = useRef(null)
+
+  const handlePdfSelect = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      alert('File must be a PDF document')
+      return
+    }
+    if (onUploadPdf) {
+      onUploadPdf(file)
+    }
+    if (pdfRef.current) pdfRef.current.value = ''
+  }
 
   // Seed input if OCR page forwarded a question
   useEffect(() => {
@@ -104,6 +118,25 @@ export default function MessageInput({ onSend, disabled, initialText = '' }) {
           accept="image/*"
           className="hidden"
           onChange={handleImageSelect}
+        />
+
+        {/* PDF upload button */}
+        <button
+          id="pdf-upload-btn"
+          type="button"
+          onClick={() => pdfRef.current?.click()}
+          className="flex-shrink-0 w-10 h-10 bg-surface-700 hover:bg-surface-600 border border-white/10 rounded-xl flex items-center justify-center text-slate-400 hover:text-white transition-all"
+          title="Upload PDF notes"
+          disabled={disabled}
+        >
+          📁
+        </button>
+        <input
+          ref={pdfRef}
+          type="file"
+          accept=".pdf"
+          className="hidden"
+          onChange={handlePdfSelect}
         />
 
         {/* Text input */}
