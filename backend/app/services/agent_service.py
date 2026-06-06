@@ -24,6 +24,11 @@ from app.services.mcp_service import (
 )
 from app.services.history_service import HistoryMessage, save_assistant_message
 from app.services.weakness_service import get_top_weak_topics
+from app.services.expert_service import (
+    ExpertRegistry,
+    detect_question_type,
+    CONFIDENCE_THRESHOLD,
+)
 
 # =====================================================================
 # AGENT STATE DEFINITION
@@ -43,6 +48,10 @@ class TutorAgentState(TypedDict):
     roadmap_steps: Optional[List[Dict[str, Any]]]
     teach_back_data: Optional[Dict[str, Any]]
     next_node: str
+    # LoRA expert routing fields
+    question_type: str                   # "numerical" | "conceptual" | "ambiguous"
+    expert_result: Optional[Dict[str, Any]]  # ExpertResult.to_dict() if LoRA ran
+    expert_used: str                     # "physics_lora" | "math_lora" | "chem_lora" | "gemini"
 
 # =====================================================================
 # AGENT NODES
@@ -173,7 +182,7 @@ Return ONLY a valid JSON object matching this schema:
 }}
 """
             response = client.models.generate_content(
-                model="gemini-1.5-flash", 
+                model="gemini-2.5-flash", 
                 contents=prompt,
                 config=types.GenerateContentConfig(response_mime_type="application/json")
             )
@@ -222,7 +231,7 @@ async def teach_back_node(state: TutorAgentState) -> Dict[str, Any]:
                 "(e.g. 'Newton's Third Law', 'Stoichiometry', 'Integration by Parts'). "
                 "Return ONLY the plain concept name."
             )
-            response = client.models.generate_content(model="gemini-1.5-flash", contents=prompt)
+            response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
             if response and response.text:
                 concept = response.text.strip()
         except Exception as e:
@@ -238,10 +247,86 @@ async def teach_back_node(state: TutorAgentState) -> Dict[str, Any]:
     }
 
 
+async def subject_router_node(state: TutorAgentState) -> Dict[str, Any]:
+    """
+    Second-level router that fires after the intent router decides on 'tutor'.
+    Detects:
+      1. Subject (physics / chemistry / mathematics / general) via route_question()
+      2. Question type (numerical / conceptual / ambiguous) via detect_question_type()
+    Routes to 'expert' node.
+    """
+    from app.services.llm_service import route_question
+    question = state["messages"][-1].content
+    subject       = route_question(question)
+    question_type = detect_question_type(question)
+    print(f"[SubjectRouter] subject={subject} | type={question_type}")
+    return {
+        "subject": subject,
+        "question_type": question_type,
+        "next_node": "expert"
+    }
+
+
+async def expert_node(state: TutorAgentState) -> Dict[str, Any]:
+    """
+    Dispatches to the appropriate LoRA expert or GeminiTutor.
+
+    Rules:
+      - numerical + known subject  → LoRAExpert (physics/chem/math)
+      - conceptual / ambiguous     → GeminiTutor (no LoRA call)
+      - LoRA confidence < threshold → fallback to GeminiTutor
+
+    The result is stored in state['expert_result'] so run_agent_stream()
+    can use the LoRA answer as raw_answer for Gemini formatting.
+    """
+    question      = state["messages"][-1].content
+    subject       = state.get("subject", "general")
+    question_type = state.get("question_type", "ambiguous")
+    history       = []  # history is passed via state messages
+
+    # Build learning context string from state for personalisation
+    learning_context = None
+    weak = state.get("weak_topics", [])
+    if weak:
+        learning_context = f"Student weak topics: {', '.join(weak)}"
+
+    registry = ExpertRegistry.get()
+
+    if question_type == "numerical" and subject in ("physics", "chemistry", "mathematics", "maths", "math"):
+        expert = registry.get_expert(subject)
+        loop   = asyncio.get_running_loop()
+        try:
+            result = await loop.run_in_executor(
+                None,
+                expert.generate,
+                question,
+                history,
+                learning_context,
+            )
+            if result.confidence >= CONFIDENCE_THRESHOLD:
+                print(f"[Expert] {result.expert_used} answered (conf={result.confidence:.2f}) ✓")
+                return {
+                    "expert_result": result.to_dict(),
+                    "expert_used": result.expert_used,
+                    "next_node": "tutor"
+                }
+            else:
+                print(f"[Expert] confidence {result.confidence:.2f} < {CONFIDENCE_THRESHOLD} — falling back to Gemini")
+        except Exception as e:
+            print(f"[Expert] LoRA generation error: {e} — falling back to Gemini")
+    else:
+        print(f"[Expert] question_type='{question_type}' → gemini (no LoRA needed)")
+
+    # Gemini path (conceptual / ambiguous / fallback)
+    return {
+        "expert_result": None,
+        "expert_used": "gemini",
+        "next_node": "tutor"
+    }
+
+
 async def tutor_node(state: TutorAgentState) -> Dict[str, Any]:
-    """Generates conceptual instruction using MoE model / Gemini."""
-    # We will compute the response path inside the router handler for streaming support
-    # This node is a placeholder inside the compiled LangGraph workflow to maintain graph state structure
+    """Placeholder — actual generation happens in run_agent_stream for streaming support."""
     return {"next_node": "memory"}
 
 
@@ -271,7 +356,7 @@ async def memory_node(state: TutorAgentState) -> Dict[str, Any]:
                     "Generate a concise, 1-sentence summary describing what concept the student is studying and "
                     "any specific difficulties or topics they struggled with (e.g. 'Student is practicing kinematics formulas and needs help with projectile motion vectors')."
                 )
-                response = client.models.generate_content(model="gemini-1.5-flash", contents=prompt)
+                response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
                 if response and response.text:
                     summary = response.text.strip()
                     print(f"[Agentic Memory] Generated summary: {summary}")
@@ -298,19 +383,21 @@ def build_tutor_graph():
     workflow = StateGraph(TutorAgentState)
     
     # Register Nodes
-    workflow.add_node("router", router_node)
-    workflow.add_node("research", research_node)
-    workflow.add_node("visualizer", visualizer_node)
-    workflow.add_node("quiz", quiz_node)
-    workflow.add_node("roadmap", roadmap_node)
-    workflow.add_node("teach_back", teach_back_node)
-    workflow.add_node("tutor", tutor_node)
-    workflow.add_node("memory", memory_node)
+    workflow.add_node("router",         router_node)
+    workflow.add_node("research",        research_node)
+    workflow.add_node("visualizer",      visualizer_node)
+    workflow.add_node("quiz",            quiz_node)
+    workflow.add_node("roadmap",         roadmap_node)
+    workflow.add_node("teach_back",      teach_back_node)
+    workflow.add_node("subject_router",  subject_router_node)  # NEW
+    workflow.add_node("expert",          expert_node)          # NEW
+    workflow.add_node("tutor",           tutor_node)
+    workflow.add_node("memory",          memory_node)
     
-    # Setup Edges
+    # Entry
     workflow.set_entry_point("router")
     
-    # Conditional edge routing from router
+    # Intent router → specialist or subject_router
     def route_from_router(state: TutorAgentState):
         return state["next_node"]
         
@@ -318,23 +405,26 @@ def build_tutor_graph():
         "router",
         route_from_router,
         {
-            "research": "research",
-            "visualizer": "visualizer",
-            "quiz": "quiz",
-            "roadmap": "roadmap",
-            "teach_back": "teach_back",
-            "tutor": "tutor"
+            "research":      "research",
+            "visualizer":    "visualizer",
+            "quiz":          "quiz",
+            "roadmap":       "roadmap",
+            "teach_back":    "teach_back",
+            "tutor":         "subject_router",   # tutor intent now goes through subject router first
         }
     )
     
-    # Intermediate routings back to tutor/end
-    workflow.add_edge("research", "tutor")
-    workflow.add_edge("visualizer", "tutor")
-    workflow.add_edge("quiz", "tutor")
-    workflow.add_edge("roadmap", "tutor")
-    workflow.add_edge("teach_back", "tutor")
-    workflow.add_edge("tutor", "memory")
-    workflow.add_edge("memory", END)
+    # Specialist nodes → subject_router (so they also get expert dispatch)
+    # Exception: teach_back skips subject_router (purely conceptual evaluation)
+    workflow.add_edge("research",     "subject_router")
+    workflow.add_edge("visualizer",   "subject_router")
+    workflow.add_edge("quiz",         "tutor")           # quiz keeps going direct to tutor
+    workflow.add_edge("roadmap",      "tutor")           # roadmap keeps going direct to tutor
+    workflow.add_edge("teach_back",   "tutor")           # teach_back keeps going direct to tutor
+    workflow.add_edge("subject_router", "expert")
+    workflow.add_edge("expert",       "tutor")
+    workflow.add_edge("tutor",        "memory")
+    workflow.add_edge("memory",       END)
     
     return workflow.compile()
 
@@ -378,7 +468,11 @@ async def run_agent_stream(
         "suggested_videos": None,
         "roadmap_steps": None,
         "teach_back_data": None,
-        "next_node": "router"
+        "next_node": "router",
+        # Expert routing fields
+        "question_type": "ambiguous",
+        "expert_result": None,
+        "expert_used": "gemini",
     }
     
     # 3. Execute Graph Node-by-Node until we hit Tutor node
@@ -391,14 +485,23 @@ async def run_agent_stream(
     # Execute intermediate nodes
     if next_step == "research":
         state.update(await research_node(state))
+        # Research results feed into subject_router + expert for numerical follow-ups
+        state.update(await subject_router_node(state))
+        state.update(await expert_node(state))
     elif next_step == "visualizer":
         state.update(await visualizer_node(state))
+        state.update(await subject_router_node(state))
+        state.update(await expert_node(state))
     elif next_step == "quiz":
-        state.update(await quiz_node(state))
+        state.update(await quiz_node(state))          # quiz bypasses expert routing
     elif next_step == "roadmap":
-        state.update(await roadmap_node(state))
+        state.update(await roadmap_node(state))       # roadmap bypasses expert routing
     elif next_step == "teach_back":
-        state.update(await teach_back_node(state))
+        state.update(await teach_back_node(state))    # teach_back bypasses expert routing
+    else:
+        # Pure tutor intent → run subject router + expert
+        state.update(await subject_router_node(state))
+        state.update(await expert_node(state))
         
     # 4. Stream response from Tutor Node
     # Build prompt prefix with helper insights from tools and cached student profiles
@@ -454,22 +557,36 @@ async def run_agent_stream(
     # Yield initial loading notice for client if we ran tools
     if next_step != "tutor":
         yield f"*(TutorAI {next_step.capitalize()} Agent active... processing results)*\\n\\n"
-        
-    # Fetch local model response
-    # Yield a wait token so the user knows local model is working
-    yield "*(Thinking natively...)*\\n\\n"
-    
-    # We execute local model generation in a threadpool to prevent blocking the async loop
+
+    # ── Expert dispatch ──────────────────────────────────────────────────────
+    # If expert_node already ran LoRA and got a high-confidence answer, use it
+    # as raw_answer for Gemini formatter. Otherwise call generate_answer() as before.
+    expert_result = state.get("expert_result")
+    expert_used   = state.get("expert_used", "gemini")
+
     loop = asyncio.get_running_loop()
-    ai_result = await loop.run_in_executor(
-        None, 
-        generate_answer, 
-        augmented_message, 
-        history, 
-        subject
-    )
-    raw_answer = ai_result.get("answer", "")
-    topic_tags = ai_result.get("topic_tags", [])
+
+    if expert_result and expert_result.get("confidence", 0) >= CONFIDENCE_THRESHOLD:
+        # LoRA answered — use its output; skip the generate_answer() LoRA call
+        raw_answer = expert_result["answer"]
+        reasoning  = expert_result.get("reasoning_steps", "")
+        boxed      = expert_result.get("final_result", "")
+        yield f"*(🔬 {expert_used.replace('_', ' ').title()} Expert active...)*\\n\\n"
+
+        from app.services.llm_service import extract_topic_tags
+        topic_tags = extract_topic_tags(message, raw_answer)
+
+        # Append structured breakdown before Gemini formats it
+        if reasoning:
+            raw_answer = f"<think>\n{reasoning}\n</think>\n\n{raw_answer}"
+    else:
+        # Gemini path — call generate_answer() which does its own adapter swap
+        yield "*(Thinking...)*\\n\\n"
+        ai_result  = await loop.run_in_executor(
+            None, generate_answer, augmented_message, history, subject
+        )
+        raw_answer = ai_result.get("answer", "")
+        topic_tags = ai_result.get("topic_tags", [])
     
     # If we have teach-back data, append the concept name to topic_tags
     if state.get("teach_back_data"):

@@ -10,12 +10,15 @@ from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from peft import PeftModel
 
-# Global singletons
+# Global singletons — exported so expert_service.py can reuse them
 _embedder = None
 _router_classifier = None
 _tokenizer = None
 _peft_model = None
 _is_loaded = False
+
+# Shared confidence threshold used by expert_service.py
+CONFIDENCE_THRESHOLD = 0.35
 
 SUBJECT_SYSTEM_PROMPTS = {
     "physics": (
@@ -172,7 +175,7 @@ def extract_topic_tags(question: str, answer: str) -> list[str]:
             "Return ONLY a comma-separated list of tags."
         )
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-2.5-flash",
             contents=prompt
         )
         if response and response.text:
@@ -198,7 +201,7 @@ def format_question_latex(question: str) -> str:
             "Simply output the formatted version of the question. Use $$ for block equations and $ for inline."
         )
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-2.5-flash",
             contents=f"{sys_prompt}\n\nUser Question to format:\n{question}"
         )
         if response and response.text:
@@ -219,7 +222,7 @@ def process_image_with_gemini(image_bytes: bytes, prompt: str = "Extract the tex
         client = google_genai.Client(api_key=api_key)
         
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-2.5-flash",
             contents=[
                 prompt,
                 types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
@@ -253,7 +256,7 @@ def generate_answer_stream(question: str, history: list[HistoryMessage], subject
             f"Raw Unformatted Local Answer:\n{raw_answer}"
         )
         for chunk in client.models.generate_content_stream(
-            model="gemini-1.5-flash",
+            model="gemini-2.5-flash",
             contents=prompt
         ):
             if chunk.text:

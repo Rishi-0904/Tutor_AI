@@ -22,6 +22,12 @@ async def lifespan(app: FastAPI):
         print("[Lifespan] MCP connection established successfully.")
     else:
         print("[Lifespan] Failed to connect to internal MCP server.")
+
+    # Initialize ExpertRegistry (maps subjects to LoRA experts / GeminiTutor)
+    # This is zero-cost — adapters are already loaded by llm_service.load_models()
+    from app.services.expert_service import ExpertRegistry
+    ExpertRegistry.initialize()
+    print("[Lifespan] ExpertRegistry initialized.")
         
     yield
     
