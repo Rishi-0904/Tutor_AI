@@ -138,12 +138,14 @@ async def chat_stream(
         full_content = f"{content}\n\n[Extracted from Image]:\n{extracted_text}" if content else extracted_text
         image_url = await run_in_threadpool(upload_image_to_supabase, image_bytes=image_bytes, file_name=image.filename)
 
-    formatted_content = await run_in_threadpool(format_question_latex, question=full_content)
+    # Skip format_question_latex for streaming — save the 1-2s Gemini round-trip.
+    # The agent's generate_answer_stream() will still produce properly formatted LaTeX.
+    message_content = full_content.strip()
     
     save_user_message(
         conversation_id=conversationId, 
         user_id=user.id, 
-        content=formatted_content,
+        content=message_content,
         image_url=image_url,
         image_ocr_text=extracted_text
     )
@@ -153,7 +155,7 @@ async def chat_stream(
             async for chunk in run_agent_stream(
                 conversation_id=conversationId,
                 user_id=user.id,
-                message=formatted_content,
+                message=message_content,
                 subject=subject,
                 history=history
             ):
@@ -165,7 +167,15 @@ async def chat_stream(
             yield f"data: {json.dumps({'content': f'\\n\\nError: {str(e)}'})}\n\n"
             yield "data: [DONE]\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",   # disable nginx/proxy buffering
+            "Connection": "keep-alive",
+        }
+    )
 
 
 from pydantic import BaseModel

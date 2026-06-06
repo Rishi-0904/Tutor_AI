@@ -2,7 +2,7 @@ import axios from 'axios'
 import { supabase } from '../lib/supabaseClient'
 
 const API = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
 })
 
 // Attach the Supabase Bearer token on every request
