@@ -47,8 +47,9 @@ async def main():
             
         print(f"Expert Used: {final_ctx.expert_used}")
         print(f"Composed Response Length: {len(final_ctx.tutor_answer)} characters")
-        print("\n=== FINAL COMPOSED RESPONSE (SNEAK PEEK) ===")
-        print(final_ctx.tutor_answer[:500] + "\n...")
+        # Encode/decode to print safely in console
+        safe_response = final_ctx.tutor_answer[:500].encode('ascii', errors='replace').decode('ascii')
+        print(safe_response + "\n...")
         
     except Exception as e:
         print(f"\nError running graph: {e}")
