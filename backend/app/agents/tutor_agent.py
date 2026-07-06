@@ -121,7 +121,7 @@ async def tutor_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str,
             None,
             lambda: client.models.generate_content(
                 model="gemini-2.5-flash",
-                contents=[types.Content(role="user", parts=[types.Part.from_text(user_content)])],
+                contents=[types.Content(role="user", parts=[types.Part(text=user_content)])],
                 config=types.GenerateContentConfig(
                     system_instruction=TUTOR_PROMPT,
                     tools=[tutor_tools],
@@ -208,7 +208,7 @@ async def tutor_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str,
                 )
 
             contents = [
-                types.Content(role="user", parts=[types.Part.from_text(user_content)]),
+                types.Content(role="user", parts=[types.Part(text=user_content)]),
                 candidate.content,  # model's function_call turn
                 types.Content(role="user", parts=fn_response_parts),
             ]

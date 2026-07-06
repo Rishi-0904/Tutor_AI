@@ -105,7 +105,7 @@ async def quiz_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, 
                         )
                     )
                 followup_prompt = [
-                    types.Content(role="user", parts=[types.Part.from_text(prompt)]),
+                    types.Content(role="user", parts=[types.Part(text=prompt)]),
                     candidate.content,
                     types.Content(role="user", parts=parts)
                 ]
