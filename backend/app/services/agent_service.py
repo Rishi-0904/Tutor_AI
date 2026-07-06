@@ -12,7 +12,7 @@ Streams responses through an asyncio.Queue to decouple execution from SSE output
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated, Any, Dict, List, Sequence, Union
+from typing import Annotated, Any, Dict, List, Sequence, Union, Optional
 from typing_extensions import TypedDict
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
@@ -44,6 +44,8 @@ class GraphState(TypedDict):
     """LangGraph State containing active messages and shared context payload."""
     messages: Annotated[Sequence[BaseMessage], add_messages]
     context: Dict[str, Any]  # Serialized AgentContext dict
+    research_output: Optional[Dict[str, Any]]
+    visual_output: Optional[Dict[str, Any]]
 
 
 # ─────────────────────────────────────────────────────────────

@@ -108,17 +108,17 @@ async def visual_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str
                 viz_type = "error"
                 viz_data = {"message": "Failed to parse visual agent output."}
 
-        ctx.visualization = VisualizationResult(
+        viz_res = VisualizationResult(
             viz_type=viz_type,
             data=viz_data
         )
         print(f"[VisualAgent] Visualization complete. Type: {viz_type}")
+        return {"visual_output": viz_res.model_dump()}
 
     except Exception as e:
         print(f"[VisualAgent] Error: {e}")
-        ctx.visualization = VisualizationResult(
+        viz_res = VisualizationResult(
             viz_type="error",
             data={"message": f"Visualization error: {e}"}
         )
-
-    return {"context": ctx.model_dump()}
+        return {"visual_output": viz_res.model_dump()}

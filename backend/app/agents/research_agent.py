@@ -111,7 +111,7 @@ async def research_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
                         model="gemini-2.5-flash",
                         contents=[
                             types.Content(role="user", parts=[
-                                types.Part.from_text(f"Search for information about: {query}")
+                                types.Part(text=f"Search for information about: {query}")
                             ]),
                             candidate.content,
                             types.Content(role="user", parts=fn_response_parts),
@@ -130,21 +130,20 @@ async def research_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
                 if part.text:
                     web_summary += part.text
 
-        ctx.research = ResearchResult(
+        research_res = ResearchResult(
             web_summary=web_summary,
             citations=citations,
             youtube_links=youtube_links,
         )
         print(f"[ResearchAgent] Complete. Summary length: {len(web_summary)}")
+        return {"research_output": research_res.model_dump()}
 
     except Exception as e:
         print(f"[ResearchAgent] Error: {e}")
-        return await _direct_search_fallback(ctx, query)
-
-    return {"context": ctx.model_dump()}
+        return await _direct_search_fallback(query)
 
 
-async def _direct_search_fallback(ctx: AgentContext, query: str) -> Dict[str, Any]:
+async def _direct_search_fallback(query: str) -> Dict[str, Any]:
     """Fallback: call search tools directly without LLM reasoning."""
     try:
         google_tool = ToolRegistry.get("google_search")
@@ -156,12 +155,12 @@ async def _direct_search_fallback(ctx: AgentContext, query: str) -> Dict[str, An
             return_exceptions=True,
         )
 
-        ctx.research = ResearchResult(
+        research_res = ResearchResult(
             web_summary=str(web_result) if not isinstance(web_result, Exception) else "",
             youtube_links=str(yt_result) if not isinstance(yt_result, Exception) else "",
         )
     except Exception as e:
         print(f"[ResearchAgent] Fallback error: {e}")
-        ctx.research = ResearchResult(web_summary=f"Search unavailable: {e}")
+        research_res = ResearchResult(web_summary=f"Search unavailable: {e}")
 
-    return {"context": ctx.model_dump()}
+    return {"research_output": research_res.model_dump()}

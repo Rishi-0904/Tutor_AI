@@ -84,25 +84,31 @@ async def memory_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str
 
     loop = asyncio.get_running_loop()
 
-    # 1. ALWAYS: Save message to history
-    await loop.run_in_executor(
-        None,
-        lambda: save_assistant_message(
-            conversation_id=ctx.conversation_id,
-            user_id=ctx.user_id,
-            content=final_content,
-            topic_tags=ctx.topic_tags,
-            is_correct=ctx.is_correct
+    # 1. ALWAYS: Save message to history (wrap in try-except to be network resilient)
+    try:
+        await loop.run_in_executor(
+            None,
+            lambda: save_assistant_message(
+                conversation_id=ctx.conversation_id,
+                user_id=ctx.user_id,
+                content=final_content,
+                topic_tags=ctx.topic_tags,
+                is_correct=ctx.is_correct
+            )
         )
-    )
+    except Exception as db_err:
+        print(f"[MemoryNode] Warning: Failed to save assistant message: {db_err}")
 
     # 2. CONDITIONAL: Update weakness snapshot only if learning state changed
     if ctx.mastery_changed:
         print(f"[MemoryNode] Learning state changed. Updating weakness snapshot.")
-        await loop.run_in_executor(
-            None,
-            lambda: create_weakness_snapshot(ctx.user_id, ctx.subject)
-        )
+        try:
+            await loop.run_in_executor(
+                None,
+                lambda: create_weakness_snapshot(ctx.user_id, ctx.subject)
+            )
+        except Exception as db_err:
+            print(f"[MemoryNode] Warning: Failed to create weakness snapshot: {db_err}")
 
         # 3. CONDITIONAL: Update mastery scores via MCP client wrappers
         for update in ctx.mastery_updates:
@@ -110,7 +116,10 @@ async def memory_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str
             score = update.get("score", 50)
             if topic:
                 print(f"[MemoryNode] Updating mastery score for topic '{topic}' to {score}%")
-                await mcp_service.update_mastery_score(ctx.user_id, topic, score)
+                try:
+                    await mcp_service.update_mastery_score(ctx.user_id, topic, score)
+                except Exception as mcp_err:
+                    print(f"[MemoryNode] Warning: Failed to update mastery score for '{topic}': {mcp_err}")
 
     # 4. CONDITIONAL: Update conversation summary periodically
     if len(messages) >= 8:

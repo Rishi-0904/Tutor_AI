@@ -82,6 +82,14 @@ async def tutor_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str,
     Uses Gemini function-calling for ReAct-style tool invocation.
     """
     ctx = AgentContext(**state["context"])
+    
+    # Load parallel outputs from state if available
+    from app.agents.context import ResearchResult, VisualizationResult
+    if state.get("research_output"):
+        ctx.research = ResearchResult(**state["research_output"])
+    if state.get("visual_output"):
+        ctx.visualization = VisualizationResult(**state["visual_output"])
+        
     queue = config.get("configurable", {}).get("stream_queue")
 
     api_key = settings.gemini_api_key
