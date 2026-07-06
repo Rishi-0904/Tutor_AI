@@ -402,13 +402,13 @@ async def _pdf_search_fn(query: str, user_id: str) -> str:
 # STREAMING UTILITIES
 # ─────────────────────────────────────────────────────────────
 
-async def stream_sync_to_queue(sync_gen, queue: asyncio.Queue) -> str:
+async def stream_sync_to_queue(sync_gen, queue: Optional[asyncio.Queue]) -> str:
     """
     Run a synchronous generator in a thread, pushing each chunk
     to an asyncio.Queue in real-time. Returns the full concatenated text.
 
     Used for streaming generate_answer_stream() output through the
-    LangGraph pipeline.
+    LangGraph pipeline. Supports None queue for non-streaming executions.
     """
     loop = asyncio.get_running_loop()
     full_parts: List[str] = []
@@ -416,7 +416,8 @@ async def stream_sync_to_queue(sync_gen, queue: asyncio.Queue) -> str:
     def _produce():
         for chunk in sync_gen:
             full_parts.append(chunk)
-            loop.call_soon_threadsafe(queue.put_nowait, chunk)
+            if queue is not None:
+                loop.call_soon_threadsafe(queue.put_nowait, chunk)
 
     await loop.run_in_executor(None, _produce)
     return "".join(full_parts)
