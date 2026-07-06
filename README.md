@@ -13,25 +13,27 @@
 
 ## ✨ Features
 
-### 🤖 Multi-Agent Architecture (LangGraph)
-TutorAI runs a **LangGraph** state-graph with specialised nodes:
+### 🤖 True Multi-Agent Architecture (LangGraph)
+TutorAI runs a **native LangGraph StateGraph** where agents are independent graph nodes, and execution routing is handled natively via conditional routing and parallel branches:
 
-| Agent | Role |
-|:---|:---|
-| **Router** | Classifies intent and routes to the right specialist |
-| **Tutor** | Gemini-powered step-by-step explanations with MoE subject routing |
-| **Memory** | Persists conversation history and updates topic mastery |
-| **Quiz** | Generates adaptive MCQs targeting weak topics |
-| **Roadmap** | Creates personalised study plans with chapter dependencies |
-| **Teach-Back** | Evaluates student explanations and scores conceptual understanding |
-| **Visualizer** | Generates interactive SVG flowcharts, DP tables, and math plots |
-| **Research** | Live web + YouTube search via LangChain tools |
+| Agent / Node | Type | Role |
+|:---|:---|:---|
+| **Orchestrator** | LLM | Classifies user intent and routes to the right specialist(s). Implements fast deterministic bypass for active teach-back responses. |
+| **Research** | LLM | Fetches live web data and YouTube videos concurrently. No redundant "should I search?" reasoning. |
+| **Visual** | LLM | Direct visualization routing: generates flowcharts, DP tables, and math curves. |
+| **Tutor** | LLM | ReAct-style agent. Exposes LoRA experts and note search as tools; LLM naturally selects them. |
+| **Critic** | LLM | Evaluates response completeness and accuracy, triggering loop-backs to Research or Tutor when info is missing. |
+| **Quiz** | LLM | Sources MCQs matching dynamic student capability and tracked weaknesses. |
+| **Teach-Back** | Deterministic | Evaluates student active recall explanations and updates mastery. |
+| **Roadmap** | Deterministic | Fetches chapter dependency studies from the database. |
+| **Memory** | Deterministic | Resiliently saves logs. Writes weakness snapshots and mastery updates only when state changes. |
+| **Composer** | Deterministic | Formats and appends visualization panels, quizzes, and scorecards. |
 
 ### 🧠 Student Profile & Mastery Engine
 - **`get_student_profile`** — full profile with goal and mastery map
 - **`update_mastery_score`** — upserts per-topic scores after every session
 - **`get_weak_topics`** — returns topics with score < 60 for targeted practice
-- **`get_learning_context`** — aggregates goal, recent topics, weak/strong areas for personalisation
+- **`get_learning_context`** Aggregates goal, recent topics, weak/strong areas for personalisation
 - Powered by an internal **FastMCP** stdio server called `tutor_mcp`
 
 ### 📊 Analytics Dashboard (Phase 8)
@@ -41,89 +43,44 @@ TutorAI runs a **LangGraph** state-graph with specialised nodes:
 - **Session History Table** — topic, duration, score before/after, delta
 - **Summary Stats** — Topics Mastered · Streak · Sessions · Avg Mastery
 
-### 📚 PDF Knowledge Base (Vector Search)
-- Upload lecture notes or textbook PDFs
-- Chunked (500 chars / 100 overlap) and embedded via **Gemini `text-embedding-004`** (768-dim)
-- Stored in **Supabase pgvector** with cosine similarity RPC `match_pdf_chunks()`
-- Async indexing via **FastAPI BackgroundTasks** — upload returns instantly
-
-### 🧪 Quiz Agent
-- Adaptive difficulty based on mastery scores
-- Questions sourced from curated JEE/NEET dataset (LaTeX rendered by Qwen2.5-VL)
-- Per-topic scoring updates the mastery engine after each submission
-
-### 🗺️ Roadmap Agent
-- Generates chapter-by-chapter study plans
-- Embeds prerequisite dependency ordering
-- Tied to student's exam goal (JEE Main / Advanced / NEET)
-
-### ✏️ Teach-Back Mode
-- Triggered when a student explains a concept back to the AI
-- AI evaluates correctness, scores it 0–100, and highlights misconceptions
-- Score feeds directly into `update_mastery_score`
-
-### 🎨 Visualizer Agent
-- **Flowcharts** rendered with React Flow
-- **DP Tables** — animated step-by-step matrix filling
-- **Function Plots** — SVG curve rendering with interactive hover crosshair
-
-### 📸 Vision OCR
-- Upload handwritten or printed problem images
-- Primary: **Gemini Vision** (`gemini-2.0-flash`) extracts LaTeX + text
-- Fallback: **Qwen2.5-VL** local model for offline capability
-- Auto-forwarded to the AI chat for solving
-
-### ✏️ Whiteboard
-- Freehand canvas drawing panel
-- Neon brush palette, undo/clear
-- Saved to Supabase `whiteboard_sketches` table via MCP
-
-### 🔍 Research Tools (LangChain)
-- **Web Search** — SerpAPI / DuckDuckGo fallback
-- **YouTube Search** — finds video explanations on-demand
-- **Code Executor** — sandboxed Python snippet runner
-
-### 💾 Memory & Persistence
-- **Redis** in-memory cache (falls back gracefully if unavailable)
-- **Supabase** Postgres for all persistent data
-- Conversation summaries for long-term context
-
 ---
 
-## 🏗️ Architecture
+## 🏗️ Multi-Agent Graph Flow
 
 ```
-Frontend (React + Vite)
-    │
-    ▼
-FastAPI Backend
-    │
-    ├── LangGraph Agent Graph
-    │     ├── Router Node
-    │     ├── Tutor Node  ──────────────── Gemini Flash
-    │     ├── Quiz Node
-    │     ├── Roadmap Node
-    │     ├── Teach-Back Node
-    │     ├── Visualizer Node ──────────── React Flow / SVG
-    │     ├── Research Node   ──────────── LangChain Tools
-    │     └── Memory Node
-    │
-    ├── Internal FastMCP Server  ──────── tutor_mcp (stdio)
-    │     ├── get_student_profile
-    │     ├── update_mastery_score
-    │     ├── get_weak_topics
-    │     ├── get_learning_context
-    │     ├── search_pdf (pgvector)
-    │     └── save_sketch / load_sketches
-    │
-    ├── Redis Cache  (optional)
-    └── Supabase (Postgres + pgvector)
-          ├── profiles
-          ├── conversations / messages
-          ├── topic_mastery
-          ├── pdf_documents / pdf_chunks (vector)
-          ├── learning_sessions
-          └── whiteboard_sketches
+                  START
+                    │
+                    ▼
+            orchestrator_node
+                    │
+         (Conditional Fan-Out Edge)
+         ┌──────────┼──────────┐
+         ▼          ▼          ▼
+     research    visual      quiz
+         │          │          │
+         ▼          ▼          │
+    (Parallel Fan-In Join)     │
+         │          │          │
+         ▼          ▼          │
+            tutor_node         │
+                    │          │
+                    ▼          │
+               critic_node     │
+                    │          │
+            (Conditional Edge) │
+             ├── Approved ─────┼──┐
+             └── Needs Info ───┘  │
+                    │             │
+             (Loop Back to        │
+              Research / Tutor)   │
+                                  ▼
+                             memory_node
+                                  │
+                                  ▼
+                            composer_node
+                                  │
+                                  ▼
+                                 END
 ```
 
 ---
