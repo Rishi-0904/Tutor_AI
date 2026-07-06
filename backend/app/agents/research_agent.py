@@ -16,9 +16,6 @@ import asyncio
 from typing import Any, Dict
 
 from langchain_core.runnables import RunnableConfig
-from google import genai as google_genai
-from google.genai import types
-
 from app.core.config import settings
 from app.agents.context import AgentContext, ResearchResult
 from app.agents.prompts import RESEARCH_PROMPT
@@ -43,48 +40,39 @@ async def research_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
 
     print(f"[ResearchAgent] Searching for: '{query[:80]}...'")
 
-    api_key = settings.gemini_api_key
-    if not api_key:
-        # Direct fallback: call tools without LLM reasoning
-        return await _direct_search_fallback(ctx, query)
-
-    client = google_genai.Client(api_key=api_key)
-    research_tools = ToolRegistry.get_gemini_tools(RESEARCH_TOOL_NAMES)
-
-    loop = asyncio.get_running_loop()
-
     try:
-        # Single Gemini call with search tools — agent searches immediately
-        response = await loop.run_in_executor(
-            None,
-            lambda: client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=f"Search for information about: {query}",
-                config=types.GenerateContentConfig(
-                    system_instruction=RESEARCH_PROMPT,
-                    tools=[research_tools],
-                ),
-            ),
+        from app.services.llm_provider import get_llm_provider
+        provider = get_llm_provider()
+
+        openai_tools = ToolRegistry.get_openai_tools(RESEARCH_TOOL_NAMES)
+        chat_messages = [
+            {"role": "system", "content": RESEARCH_PROMPT},
+            {"role": "user", "content": f"Search for information about: {query}"}
+        ]
+
+        response = await provider.complete(
+            model=settings.research_model,
+            messages=chat_messages,
+            tools=openai_tools
         )
 
-        # Execute any tool calls
-        candidate = response.candidates[0]
-        function_calls = [p.function_call for p in candidate.content.parts if p.function_call]
-
-        web_summary = ""
+        tool_calls = response.get("tool_calls") or []
+        web_summary = response.get("text") or ""
         youtube_links = ""
         citations = []
 
-        if function_calls:
+        if tool_calls:
             # Execute tools in parallel
             tasks = []
-            for fc in function_calls:
-                tool = ToolRegistry.get(fc.name)
-                tasks.append((fc.name, tool.aexecute(**dict(fc.args))))
+            for tc in tool_calls:
+                name = tc["function"]["name"]
+                args = json.loads(tc["function"]["arguments"])
+                tool = ToolRegistry.get(name)
+                tasks.append((name, tc["id"], tool.aexecute(**args)))
 
-            results = await asyncio.gather(*[t[1] for t in tasks], return_exceptions=True)
+            results = await asyncio.gather(*[t[2] for t in tasks], return_exceptions=True)
 
-            for (name, _), result in zip(tasks, results):
+            for (name, _, _), result in zip(tasks, results):
                 if isinstance(result, Exception):
                     print(f"[ResearchAgent] Tool {name} error: {result}")
                     continue
@@ -93,42 +81,38 @@ async def research_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
                 elif name == "youtube_search":
                     youtube_links = str(result)
 
-            # Send tool results back to Gemini for a summary
-            fn_response_parts = []
-            for (name, _), result in zip(tasks, results):
+            # Send tool results back to LLM for a summary
+            fn_responses = []
+            for (name, call_id, _), result in zip(tasks, results):
                 if not isinstance(result, Exception):
-                    fn_response_parts.append(
-                        types.Part.from_function_response(
-                            name=name,
-                            response={"result": str(result)[:2000]},
-                        )
-                    )
+                    fn_responses.append({
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "name": name,
+                        "content": str(result)[:2000]
+                    })
 
-            if fn_response_parts:
-                summary_response = await loop.run_in_executor(
-                    None,
-                    lambda: client.models.generate_content(
-                        model="gemini-2.5-flash",
-                        contents=[
-                            types.Content(role="user", parts=[
-                                types.Part(text=f"Search for information about: {query}")
-                            ]),
-                            candidate.content,
-                            types.Content(role="user", parts=fn_response_parts),
-                        ],
-                        config=types.GenerateContentConfig(
-                            system_instruction=RESEARCH_PROMPT,
-                        ),
-                    ),
+            if fn_responses:
+                # Add assistant message with tool calls structure
+                assistant_tc = []
+                for tc in tool_calls:
+                    assistant_tc.append({
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": tc["function"]
+                    })
+                
+                summary_messages = [
+                    {"role": "system", "content": RESEARCH_PROMPT},
+                    {"role": "user", "content": f"Search for information about: {query}"},
+                    {"role": "assistant", "content": None, "tool_calls": assistant_tc},
+                ] + fn_responses
+
+                summary_response = await provider.complete(
+                    model=settings.research_model,
+                    messages=summary_messages
                 )
-                if summary_response and summary_response.text:
-                    web_summary = summary_response.text
-        else:
-            # Gemini answered directly (possibly via built-in knowledge)
-            web_summary = ""
-            for part in candidate.content.parts:
-                if part.text:
-                    web_summary += part.text
+                web_summary = summary_response.get("text") or ""
 
         research_res = ResearchResult(
             web_summary=web_summary,

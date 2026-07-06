@@ -15,9 +15,6 @@ import asyncio
 from typing import Any, Dict
 
 from langchain_core.runnables import RunnableConfig
-from google import genai as google_genai
-from google.genai import types
-
 from app.core.config import settings
 from app.agents.context import AgentContext, VisualizationResult
 from app.agents.prompts import VISUAL_PROMPT
@@ -40,53 +37,39 @@ async def visual_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str
 
     print(f"[VisualAgent] Processing visualization for query: '{query[:80]}...'")
 
-    api_key = settings.gemini_api_key
-    if not api_key:
-        # Fallback: return default error result
-        ctx.visualization = VisualizationResult(
-            viz_type="error",
-            data={"message": "Gemini API key missing. Visual tools offline."}
-        )
-        return {"context": ctx.model_dump()}
-
-    client = google_genai.Client(api_key=api_key)
-    visual_tools = ToolRegistry.get_gemini_tools(VISUAL_TOOL_NAMES)
-
-    loop = asyncio.get_running_loop()
-
     try:
-        # Call Gemini to decide what type of visualization fits and invoke the tool
-        response = await loop.run_in_executor(
-            None,
-            lambda: client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=f"Determine how to visualize this query: {query}",
-                config=types.GenerateContentConfig(
-                    system_instruction=VISUAL_PROMPT,
-                    tools=[visual_tools],
-                ),
-            ),
+        from app.services.llm_provider import get_llm_provider
+        provider = get_llm_provider()
+
+        openai_tools = ToolRegistry.get_openai_tools(VISUAL_TOOL_NAMES)
+        chat_messages = [
+            {"role": "system", "content": VISUAL_PROMPT},
+            {"role": "user", "content": f"Determine how to visualize this query: {query}"}
+        ]
+
+        response = await provider.complete(
+            model=settings.visual_model,
+            messages=chat_messages,
+            tools=openai_tools
         )
 
-        candidate = response.candidates[0]
-        function_calls = [p.function_call for p in candidate.content.parts if p.function_call]
-
+        tool_calls = response.get("tool_calls") or []
         viz_type = ""
         viz_data = {}
 
-        if function_calls:
+        if tool_calls:
             # Execute tool call
-            fc = function_calls[0]
-            tool = ToolRegistry.get(fc.name)
-            args = dict(fc.args)
-
+            tc = tool_calls[0]
+            name = tc["function"]["name"]
+            args = json.loads(tc["function"]["arguments"])
+            
+            tool = ToolRegistry.get(name)
             result = await tool.aexecute(**args)
 
-            if fc.name == "svg_visualizer":
+            if name == "svg_visualizer":
                 viz_data = result if isinstance(result, dict) else {}
                 viz_type = viz_data.get("type", "flowchart")
-            elif fc.name == "math_plot":
-                # If math_plot runs, we return a function_plot type wrapper
+            elif name == "math_plot":
                 points = result if isinstance(result, list) else []
                 viz_data = {
                     "type": "function_plot",
@@ -95,11 +78,8 @@ async def visual_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str
                 }
                 viz_type = "function_plot"
         else:
-            # Fallback if LLM generated content directly instead of calling tools
-            # Let's inspect the text response
-            direct_text = response.text or ""
+            direct_text = response.get("text") or ""
             try:
-                # Try parsing if it's a JSON block
                 parsed = json.loads(direct_text.strip())
                 if isinstance(parsed, dict) and "type" in parsed:
                     viz_data = parsed

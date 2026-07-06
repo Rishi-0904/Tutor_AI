@@ -18,9 +18,6 @@ from typing import Any, Dict
 
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
-from google import genai as google_genai
-from google.genai import types
-
 from app.core.config import settings
 from app.agents.context import AgentContext
 from app.agents.prompts import ORCHESTRATOR_PROMPT
@@ -101,23 +98,24 @@ async def orchestrator_node(state: Dict[str, Any], config: RunnableConfig) -> Di
     print(f"[Orchestrator] Classifying intent for: '{user_message[:80]}...'")
 
     try:
-        client = google_genai.Client(api_key=api_key)
+        from app.services.llm_provider import get_llm_provider
+        provider = get_llm_provider()
+        
+        # Build standard messages log format
+        chat_messages = [
+            {"role": "system", "content": ORCHESTRATOR_PROMPT},
+            {"role": "user", "content": f"Student message: {user_message}"}
+        ]
 
-        loop = asyncio.get_running_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=f"Student message: {user_message}",
-                config=types.GenerateContentConfig(
-                    system_instruction=ORCHESTRATOR_PROMPT,
-                    response_mime_type="application/json",
-                ),
-            ),
+        response = await provider.complete(
+            model=settings.orchestrator_model,
+            messages=chat_messages,
+            json_mode=True
         )
 
-        if response and response.text:
-            result = json.loads(response.text.strip())
+        text_out = response.get("text") or ""
+        if text_out:
+            result = json.loads(text_out.strip())
             agents = result.get("agents", ["tutor"])
             reasoning = result.get("reasoning", "")
 

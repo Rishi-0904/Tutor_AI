@@ -44,6 +44,27 @@ class ToolDefinition:
     fn: Callable
     is_async: bool = False
 
+    def to_openai_tool(self) -> dict:
+        """Convert to standard OpenAI function tool schema."""
+        properties = {}
+        for prop_name, prop_schema in self.parameters.get("properties", {}).items():
+            properties[prop_name] = {
+                "type": prop_schema.get("type", "string"),
+                "description": prop_schema.get("description", "")
+            }
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": self.parameters.get("required", [])
+                }
+            }
+        }
+
     def to_gemini_declaration(self) -> types.FunctionDeclaration:
         """Convert to Gemini's FunctionDeclaration format."""
         properties = {}
@@ -110,6 +131,11 @@ class ToolRegistry:
     @classmethod
     def has(cls, name: str) -> bool:
         return name in cls._tools
+
+    @classmethod
+    def get_openai_tools(cls, names: List[str]) -> List[dict]:
+        """Build standard OpenAI tool schemas for the given tool names."""
+        return [cls._tools[n].to_openai_tool() for n in names if n in cls._tools]
 
     @classmethod
     def get_gemini_tools(cls, names: List[str]) -> types.Tool:

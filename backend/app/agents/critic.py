@@ -16,9 +16,6 @@ import asyncio
 from typing import Any, Dict
 
 from langchain_core.runnables import RunnableConfig
-from google import genai as google_genai
-from google.genai import types
-
 from app.core.config import settings
 from app.agents.context import AgentContext, CriticFeedback
 from app.agents.prompts import CRITIC_PROMPT
@@ -64,24 +61,24 @@ Research Information Available: {research_summary}
 Tutor Generated Explanation: {tutor_answer}
 """
 
-    client = google_genai.Client(api_key=api_key)
-    loop = asyncio.get_running_loop()
-
     try:
-        response = await loop.run_in_executor(
-            None,
-            lambda: client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=evaluation_prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=CRITIC_PROMPT,
-                    response_mime_type="application/json",
-                ),
-            ),
+        from app.services.llm_provider import get_llm_provider
+        provider = get_llm_provider()
+
+        chat_messages = [
+            {"role": "system", "content": CRITIC_PROMPT},
+            {"role": "user", "content": evaluation_prompt}
+        ]
+
+        response = await provider.complete(
+            model=settings.critic_model,
+            messages=chat_messages,
+            json_mode=True
         )
 
-        if response and response.text:
-            result = json.loads(response.text.strip())
+        text_out = response.get("text") or ""
+        if text_out:
+            result = json.loads(text_out.strip())
             approved = result.get("approved", True)
             feedback = result.get("feedback", "")
             action = result.get("action", "approve")

@@ -12,9 +12,6 @@ import asyncio
 from typing import Any, Dict
 
 from langchain_core.runnables import RunnableConfig
-from google import genai as google_genai
-from google.genai import types
-
 from app.core.config import settings
 from app.agents.context import AgentContext, QuizResult
 from app.agents.prompts import QUIZ_PROMPT
@@ -28,7 +25,7 @@ async def quiz_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, 
     """
     LangGraph node: Quiz Agent.
 
-    Uses Gemini to orchestrate:
+    Uses LLM to orchestrate:
       1. Evaluating student difficulty level.
       2. Retrieving weak topics.
       3. Sourcing/generating quiz questions.
@@ -39,99 +36,93 @@ async def quiz_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, 
 
     print(f"[QuizAgent] Formulating adaptive quiz for user {user_id} on {subject}")
 
-    api_key = settings.gemini_api_key
-    if not api_key:
-        # Direct fallback
-        return await _direct_quiz_fallback(ctx, user_id, subject)
-
-    client = google_genai.Client(api_key=api_key)
-    quiz_tools = ToolRegistry.get_gemini_tools(QUIZ_TOOL_NAMES)
-
-    loop = asyncio.get_running_loop()
-
     try:
-        # Prompt Gemini to orchestrate the tools to build the quiz
+        from app.services.llm_provider import get_llm_provider
+        provider = get_llm_provider()
+
+        openai_tools = ToolRegistry.get_openai_tools(QUIZ_TOOL_NAMES)
         prompt = f"Run adaptive quiz checks for user {user_id} on subject {subject}."
-        response = await loop.run_in_executor(
-            None,
-            lambda: client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=QUIZ_PROMPT,
-                    tools=[quiz_tools],
-                ),
-            ),
+        chat_messages = [
+            {"role": "system", "content": QUIZ_PROMPT},
+            {"role": "user", "content": prompt}
+        ]
+
+        response = await provider.complete(
+            model=settings.quiz_model,
+            messages=chat_messages,
+            tools=openai_tools
         )
 
-        candidate = response.candidates[0]
-        function_calls = [p.function_call for p in candidate.content.parts if p.function_call]
-
+        tool_calls = response.get("tool_calls") or []
         difficulty = "medium"
         weak_topics = [subject]
         quiz_data = {}
 
-        if function_calls:
+        if tool_calls:
             # ReAct Loop: Execute tools
             tool_results = {}
-            for fc in function_calls:
-                tool = ToolRegistry.get(fc.name)
-                # Pass user_id and subject appropriately
-                args = dict(fc.args)
+            for tc in tool_calls:
+                name = tc["function"]["name"]
+                args = json.loads(tc["function"]["arguments"])
                 if "user_id" not in args:
                     args["user_id"] = user_id
                 if "subject" not in args:
                     args["subject"] = subject
 
+                tool = ToolRegistry.get(name)
                 result = await tool.aexecute(**args)
-                tool_results[fc.name] = result
+                tool_results[name] = result
 
-                if fc.name == "difficulty_evaluator":
+                if name == "difficulty_evaluator":
                     difficulty = str(result)
-                elif fc.name == "weak_topics":
+                elif name == "weak_topics":
                     weak_topics = result if isinstance(result, list) else [subject]
-                elif fc.name == "quiz_generator":
+                elif name == "quiz_generator":
                     quiz_data = result if isinstance(result, dict) else {}
 
             # If quiz_generator was not called in the first turn, request it explicitly
             if "quiz_generator" not in tool_results:
-                # Compile turn answers to feed back to Gemini
-                parts = []
-                for fc in function_calls:
-                    parts.append(
-                        types.Part.from_function_response(
-                            name=fc.name,
-                            response={"result": tool_results[fc.name]}
-                        )
-                    )
-                followup_prompt = [
-                    types.Content(role="user", parts=[types.Part(text=prompt)]),
-                    candidate.content,
-                    types.Content(role="user", parts=parts)
-                ]
-                
-                # Gemini will call quiz_generator now
-                followup = await loop.run_in_executor(
-                    None,
-                    lambda: client.models.generate_content(
-                        model="gemini-2.5-flash",
-                        contents=followup_prompt,
-                        config=types.GenerateContentConfig(
-                            system_instruction=QUIZ_PROMPT,
-                            tools=[quiz_tools]
-                        )
-                    )
+                fn_responses = []
+                for tc in tool_calls:
+                    name = tc["function"]["name"]
+                    fn_responses.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "name": name,
+                        "content": str(tool_results[name])
+                    })
+
+                assistant_tc = [{
+                    "id": tc["id"],
+                    "type": "function",
+                    "function": tc["function"]
+                } for tc in tool_calls]
+
+                followup_messages = [
+                    {"role": "system", "content": QUIZ_PROMPT},
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": None, "tool_calls": assistant_tc}
+                ] + fn_responses
+
+                followup = await provider.complete(
+                    model=settings.quiz_model,
+                    messages=followup_messages,
+                    tools=openai_tools
                 )
                 
-                fc_followup = [p.function_call for p in followup.candidates[0].content.parts if p.function_call]
+                fc_followup = followup.get("tool_calls") or []
                 if fc_followup:
-                    fc = fc_followup[0]
-                    tool = ToolRegistry.get(fc.name)
-                    args = dict(fc.args)
+                    tc = fc_followup[0]
+                    name = tc["function"]["name"]
+                    args = json.loads(tc["function"]["arguments"])
                     args["user_id"] = user_id
                     args["subject"] = subject
                     args["difficulty"] = difficulty
-                    args["num_questions"] = 1 # quick MCQ checks in chat node
+                    args["num_questions"] = 1
+                    
+                    tool = ToolRegistry.get(name)
+                    quiz_res = await tool.aexecute(**args)
+                    quiz_data = quiz_res if isinstance(quiz_res, dict) else {}
                     
                     quiz_res = await tool.aexecute(**args)
                     quiz_data = quiz_res if isinstance(quiz_res, dict) else {}

@@ -23,9 +23,6 @@ import asyncio
 from typing import Any, Dict, List
 
 from langchain_core.runnables import RunnableConfig
-from google import genai as google_genai
-from google.genai import types
-
 from app.core.config import settings
 from app.agents.context import AgentContext
 from app.agents.prompts import TUTOR_PROMPT, TEACH_BACK_INVITATION
@@ -104,61 +101,49 @@ async def tutor_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str,
         return {"context": ctx.model_dump()}
 
     user_content = _build_tutor_context(ctx)
-    client = google_genai.Client(api_key=api_key)
 
-    # Build Gemini tool declarations
-    tutor_tools = ToolRegistry.get_gemini_tools(TUTOR_TOOL_NAMES)
+    # Build OpenAI tool declarations
+    openai_tools = ToolRegistry.get_openai_tools(TUTOR_TOOL_NAMES)
 
     print(f"[TutorAgent] Processing: '{ctx.user_query[:80]}...'")
 
-    # ── Phase 1: Initial streaming call (handles both conceptual and tool-calling) ──
-    loop = asyncio.get_running_loop()
-
-    # We use a non-streaming call first to detect tool calls
-    # This avoids the complexity of parsing function_calls from a stream
     try:
-        response = await loop.run_in_executor(
-            None,
-            lambda: client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=[types.Content(role="user", parts=[types.Part(text=user_content)])],
-                config=types.GenerateContentConfig(
-                    system_instruction=TUTOR_PROMPT,
-                    tools=[tutor_tools],
-                ),
-            ),
+        from app.services.llm_provider import get_llm_provider
+        provider = get_llm_provider()
+
+        chat_messages = [
+            {"role": "system", "content": TUTOR_PROMPT},
+            {"role": "user", "content": user_content}
+        ]
+
+        response = await provider.complete(
+            model=settings.tutor_model,
+            messages=chat_messages,
+            tools=openai_tools
         )
     except Exception as e:
-        error_msg = f"\n\nError communicating with Gemini API: {str(e)}\n"
+        error_msg = f"\n\nError communicating with LLM Provider: {str(e)}\n"
         ctx.tutor_answer = error_msg
         if queue:
             await queue.put(error_msg)
         return {"context": ctx.model_dump()}
 
-    # Parse response for function calls vs direct text
-    candidate = response.candidates[0]
-    function_calls = []
-    direct_text = ""
-
-    for part in candidate.content.parts:
-        if part.function_call:
-            function_calls.append(part.function_call)
-        elif part.text:
-            direct_text += part.text
+    tool_calls = response.get("tool_calls") or []
+    direct_text = response.get("text") or ""
 
     full_response = ""
     expert_used = "gemini"
 
-    if function_calls:
+    if tool_calls:
         # ── Tool-calling path (ReAct) ──
-        print(f"[TutorAgent] Tool calls requested: {[fc.name for fc in function_calls]}")
+        print(f"[TutorAgent] Tool calls requested: {[tc['function']['name'] for tc in tool_calls]}")
 
         tool_results = {}
         raw_answer = ""
 
-        for fc in function_calls:
-            tool_name = fc.name
-            tool_args = dict(fc.args)
+        for tc in tool_calls:
+            tool_name = tc["function"]["name"]
+            tool_args = json.loads(tc["function"]["arguments"])
             print(f"[TutorAgent] Executing tool: {tool_name}({tool_args})")
 
             try:
@@ -177,8 +162,8 @@ async def tutor_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str,
 
         # Check confidence from LoRA results
         confidence = 0
-        for fc in function_calls:
-            r = tool_results.get(fc.name, {})
+        for tc in tool_calls:
+            r = tool_results.get(tc["function"]["name"], {})
             if isinstance(r, dict):
                 confidence = max(confidence, r.get("confidence", 0))
 
@@ -193,56 +178,45 @@ async def tutor_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str,
             full_response = await stream_sync_to_queue(gen, queue)
 
         else:
-            # ── Low confidence or non-answer tool → send results back to Gemini ──
+            # ── Low confidence or non-answer tool → send results back to LLM ──
             if queue:
                 await queue.put("*(Thinking...)*\\n\\n")
 
-            # Build multi-turn contents with function response
-            fn_response_parts = []
-            for fc in function_calls:
-                fn_response_parts.append(
-                    types.Part.from_function_response(
-                        name=fc.name,
-                        response={"result": json.dumps(tool_results.get(fc.name, {}), default=str)},
-                    )
-                )
+            # Build multi-turn messages log with tool responses
+            assistant_tc = [{
+                "id": tc["id"],
+                "type": "function",
+                "function": tc["function"]
+            } for tc in tool_calls]
 
-            contents = [
-                types.Content(role="user", parts=[types.Part(text=user_content)]),
-                candidate.content,  # model's function_call turn
-                types.Content(role="user", parts=fn_response_parts),
-            ]
+            fn_responses = []
+            for tc in tool_calls:
+                name = tc["function"]["name"]
+                fn_responses.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "name": name,
+                    "content": json.dumps(tool_results.get(name, {}), default=str)
+                })
 
-            # Stream Gemini's final response
-            def _stream_followup():
-                parts = []
-                for chunk in client.models.generate_content_stream(
-                    model="gemini-2.5-flash",
-                    contents=contents,
-                    config=types.GenerateContentConfig(
-                        system_instruction=TUTOR_PROMPT,
-                    ),
-                ):
-                    if chunk.text:
-                        parts.append(chunk.text)
-                        loop.call_soon_threadsafe(queue.put_nowait, chunk.text)
-                return "".join(parts)
+            followup_messages = [
+                {"role": "system", "content": TUTOR_PROMPT},
+                {"role": "user", "content": user_content},
+                {"role": "assistant", "content": None, "tool_calls": assistant_tc}
+            ] + fn_responses
 
             if queue:
-                full_response = await loop.run_in_executor(None, _stream_followup)
-            else:
-                # No queue (non-streaming endpoint) — collect all at once
-                followup = await loop.run_in_executor(
-                    None,
-                    lambda: client.models.generate_content(
-                        model="gemini-2.5-flash",
-                        contents=contents,
-                        config=types.GenerateContentConfig(
-                            system_instruction=TUTOR_PROMPT,
-                        ),
-                    ),
+                full_response = await provider.complete_stream(
+                    model=settings.tutor_model,
+                    messages=followup_messages,
+                    queue=queue
                 )
-                full_response = followup.text if followup and followup.text else ""
+            else:
+                followup = await provider.complete(
+                    model=settings.tutor_model,
+                    messages=followup_messages
+                )
+                full_response = followup.get("text") or ""
 
     else:
         # ── Conceptual path (no tool call) — Gemini answered directly ──
@@ -266,7 +240,7 @@ async def tutor_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str,
     # Teach-back invitation for conceptual answers (no tool calls, no quiz/roadmap/teach_back)
     non_invitable = {"quiz", "roadmap", "teach_back"}
     should_invite = (
-        not function_calls
+        not tool_calls
         and not any(a in ctx.intent for a in non_invitable)
     )
     if should_invite:
