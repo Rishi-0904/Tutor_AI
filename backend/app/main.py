@@ -28,6 +28,11 @@ async def lifespan(app: FastAPI):
     from app.services.expert_service import ExpertRegistry
     ExpertRegistry.initialize()
     print("[Lifespan] ExpertRegistry initialized.")
+
+    # Initialize ToolRegistry for the multi-agent system
+    from app.agents.tools import ToolRegistry
+    ToolRegistry.initialize()
+    print("[Lifespan] ToolRegistry initialized.")
         
     yield
     

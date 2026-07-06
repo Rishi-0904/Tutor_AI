@@ -153,7 +153,7 @@ async def web_search_tool(query: str) -> str:
             print(f"[Research Tool] Running Gemini Search Grounding for: '{query}'")
             client = google_genai.Client(api_key=api_key)
             response = client.models.generate_content(
-                model="gemini-1.5-flash",
+                model="gemini-2.5-flash",
                 contents=f"Search the web and summarize details for: {query}",
                 config=types.GenerateContentConfig(
                     tools=[types.Tool(google_search=types.GoogleSearch())],

@@ -47,7 +47,7 @@ async def get_summary(user: UserInfo = Depends(get_current_user)):
 @router.get("/analytics/mastery")
 async def get_mastery(user: UserInfo = Depends(get_current_user)):
     """Returns per-topic mastery scores grouped by subject."""
-    res = supabase.table("topic_mastery").select("topic,score,subject,updated_at").eq("user_id", user.id).order("score", desc=False).execute()
+    res = supabase.table("topic_mastery").select("topic,score,updated_at").eq("user_id", user.id).order("score", desc=False).execute()
     topics = res.data or []
 
     grouped: dict = {}
