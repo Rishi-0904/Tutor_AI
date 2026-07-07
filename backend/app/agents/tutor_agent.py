@@ -7,7 +7,7 @@ Replaces: subject_router_node, expert_node, tutor_node.
 
 Uses Gemini with function-calling to naturally select the right tool:
   Thought: This is a physics numerical problem.
-  Tool: physics_lora(question="...")
+  Tool: physics_grpo(question="...")
   Observation: {answer: "...", confidence: 0.87}
   Thought: High confidence. Format this answer.
   Finish: [formatted response with LaTeX]
@@ -32,9 +32,9 @@ from app.services.expert_service import CONFIDENCE_THRESHOLD
 
 # Tools the Tutor Agent can invoke
 TUTOR_TOOL_NAMES = [
-    "physics_lora",
-    "math_lora",
-    "chemistry_lora",
+    "physics_grpo",
+    "math_grpo",
+    "chemistry_grpo",
     "pdf_search",
     "weak_topics",
 ]

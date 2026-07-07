@@ -124,7 +124,7 @@ class ExpertResult:
     reasoning_steps: str   # extracted <think>...</think> block
     final_result: str      # extracted \boxed{...} content
     confidence: float
-    expert_used: str       # "physics_lora" | "chem_lora" | "math_lora" | "gemini"
+    expert_used: str       # "physics_grpo" | "chemistry_grpo" | "math_grpo" | "gemini"
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

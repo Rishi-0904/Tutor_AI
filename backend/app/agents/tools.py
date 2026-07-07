@@ -113,8 +113,8 @@ class ToolRegistry:
         tool = ToolRegistry.get("my_tool")
         result = await tool.aexecute(question="...")
 
-        # Get Gemini-compatible tool declarations for specific tools
-        gemini_tools = ToolRegistry.get_gemini_tools(["physics_lora", "math_lora"])
+    # Get Gemini-compatible tool declarations for specific tools
+        gemini_tools = ToolRegistry.get_gemini_tools(["physics_grpo", "math_grpo"])
     """
     _tools: Dict[str, ToolDefinition] = {}
 
@@ -166,30 +166,30 @@ def _build_all_tools() -> List[ToolDefinition]:
     """Construct all tool definitions, wrapping existing service functions."""
     tools = []
 
-    # ── Subject Expert Tools (LoRA) ──────────────────────────
+    # ── Subject Expert Tools (GRPO) ──────────────────────────
     tools.append(_build_lora_tool(
-        name="physics_lora",
+        name="physics_grpo",
         subject="physics",
         description=(
-            "Solve a numerical physics problem using the Physics LoRA expert. "
+            "Solve a numerical physics problem using the Physics GRPO reasoning expert. "
             "Use for problems involving forces, motion, energy, circuits, optics, "
             "thermodynamics, waves, modern physics, etc."
         ),
     ))
     tools.append(_build_lora_tool(
-        name="math_lora",
+        name="math_grpo",
         subject="mathematics",
         description=(
-            "Solve a numerical mathematics problem using the Math LoRA expert. "
+            "Solve a numerical mathematics problem using the Math GRPO reasoning expert. "
             "Use for calculus, algebra, coordinate geometry, probability, matrices, "
             "complex numbers, differential equations, etc."
         ),
     ))
     tools.append(_build_lora_tool(
-        name="chemistry_lora",
+        name="chemistry_grpo",
         subject="chemistry",
         description=(
-            "Solve a numerical chemistry problem using the Chemistry LoRA expert. "
+            "Solve a numerical chemistry problem using the Chemistry GRPO reasoning expert. "
             "Use for stoichiometry, equilibrium, electrochemistry, organic reactions, "
             "thermochemistry, atomic structure, etc."
         ),
@@ -322,9 +322,9 @@ def _build_all_tools() -> List[ToolDefinition]:
 # ─────────────────────────────────────────────────────────────
 
 def _build_lora_tool(name: str, subject: str, description: str) -> ToolDefinition:
-    """Factory for LoRA expert tools (Mocked for testing without GPU)."""
-    def _lora_fn(question: str) -> dict:
-        print(f"[LoRA Mock Tool] Mocking LoRA call for {subject} with query: '{question}'")
+    """Factory for GRPO expert tools (Mocked for testing without GPU)."""
+    def _grpo_fn(question: str) -> dict:
+        print(f"[GRPO Mock Tool] Mocking GRPO call for {subject} with query: '{question}'")
         # Return a mock ExpertResult dictionary structure
         return {
             "answer": (
@@ -337,7 +337,7 @@ def _build_lora_tool(name: str, subject: str, description: str) -> ToolDefinitio
             "reasoning_steps": "Mocked reasoning steps showing the conceptual breakdown.",
             "final_result": "42",
             "confidence": 0.95,
-            "expert_used": f"{subject}_lora_mocked"
+            "expert_used": f"{subject}_grpo_mocked"
         }
 
     return ToolDefinition(
@@ -349,7 +349,7 @@ def _build_lora_tool(name: str, subject: str, description: str) -> ToolDefinitio
             },
             "required": ["question"],
         },
-        fn=_lora_fn,
+        fn=_grpo_fn,
     )
 
 

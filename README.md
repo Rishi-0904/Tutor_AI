@@ -21,7 +21,7 @@ TutorAI runs a **native LangGraph StateGraph** where agents are independent grap
 | **Orchestrator** | LLM | Classifies user intent and routes to the right specialist(s). Implements fast deterministic bypass for active teach-back responses. |
 | **Research** | LLM | Fetches live web data and YouTube videos concurrently. No redundant "should I search?" reasoning. |
 | **Visual** | LLM | Direct visualization routing: generates flowcharts, DP tables, and math curves. |
-| **Tutor** | LLM | ReAct-style agent. Exposes LoRA experts and note search as tools; LLM naturally selects them. |
+| **Tutor** | LLM | ReAct-style agent. Exposes GRPO fine-tuned models (physics_grpo, math_grpo, chemistry_grpo) and note search as tools; LLM naturally selects them. |
 | **Critic** | LLM | Evaluates response completeness and accuracy, triggering loop-backs to Research or Tutor when info is missing. |
 | **Quiz** | LLM | Sources MCQs matching dynamic student capability and tracked weaknesses. |
 | **Teach-Back** | Deterministic | Evaluates student active recall explanations and updates mastery. |
@@ -107,7 +107,7 @@ TutorAI runs a **native LangGraph StateGraph** where agents are independent grap
 - Python 3.11+
 - Node.js 18+
 - Supabase project with pgvector enabled
-- Google AI API key (Gemini)
+- Google AI API key (Gemini) or OpenRouter API key
 - Redis (optional, falls back to in-memory)
 
 ### Backend
@@ -118,7 +118,7 @@ pip install -r requirements.txt
 
 # Create .env
 cp .env.example .env
-# Fill in: GEMINI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY, FRONTEND_URL
+# Fill in: LLM_PROVIDER, OPENROUTER_API_KEY, GEMINI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY, FRONTEND_URL
 
 # Run database migrations
 # Apply supabase/migrations/*.sql in your Supabase SQL editor
@@ -179,7 +179,9 @@ TutorAI/
 
 ### Backend `.env`
 ```
-GEMINI_API_KEY=
+LLM_PROVIDER=openrouter               # "openrouter" or "gemini"
+OPENROUTER_API_KEY=                 # required if using OpenRouter
+GEMINI_API_KEY=                     # required if using Gemini
 SUPABASE_URL=
 SUPABASE_SERVICE_KEY=
 FRONTEND_URL=http://localhost:5173
