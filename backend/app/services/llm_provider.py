@@ -456,8 +456,6 @@ class NvidiaProvider(OpenRouterProvider):
         # Translate OpenRouter/standard model names to NVIDIA's NIM model names
         if model.startswith("meta-llama/"):
             return model.replace("meta-llama/", "meta/")
-        if "deepseek-r1" in model.lower():
-            return "deepseek-ai/deepseek-r1"
         if model.startswith("deepseek/"):
             return model.replace("deepseek/", "deepseek-ai/")
         return model

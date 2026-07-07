@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     
     # Model Registry
     orchestrator_model: str = "meta-llama/llama-3.1-8b-instruct"
-    tutor_model: str = "deepseek/deepseek-r1-distill-qwen-32b"
+    tutor_model: str = "deepseek/deepseek-v4-flash"
     research_model: str = "meta-llama/llama-3.1-8b-instruct"
     visual_model: str = "meta-llama/llama-3.1-8b-instruct"
     quiz_model: str = "meta-llama/llama-3.1-8b-instruct"
