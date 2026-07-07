@@ -108,6 +108,11 @@ class OpenRouterProvider(LLMProvider):
         if tools:
             payload["tools"] = tools
 
+        print("--- [LLMProvider Request] ---")
+        print("URL:", self.base_url)
+        print("MODEL:", model)
+        print("PAYLOAD:", json.dumps(payload, indent=2)[:500] + "\n... (truncated)")
+
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:
                 response = await client.post(
@@ -115,6 +120,8 @@ class OpenRouterProvider(LLMProvider):
                     headers=self._get_headers(),
                     json=payload
                 )
+                print("STATUS:", response.status_code)
+                print("BODY:", response.text)
                 response.raise_for_status()
                 data = response.json()
                 
@@ -124,7 +131,31 @@ class OpenRouterProvider(LLMProvider):
                     "tool_calls": choice.get("tool_calls") or []
                 }
             except Exception as e:
-                print(f"[OpenRouter] API Error: {e} - falling back to mock response.")
+                # If a 404/model failure occurs on Nvidia/OpenRouter, try to fall back to llama-3.1-8b-instruct
+                # to get a real answer, before falling back to static mock response.
+                fallback_model = "meta/llama-3.1-8b-instruct" if "nvidia" in self.base_url else "meta-llama/llama-3.1-8b-instruct"
+                if model != fallback_model:
+                    print(f"[LLMProvider] API Error: {e}. Retrying with fallback model '{fallback_model}'...")
+                    payload["model"] = fallback_model
+                    try:
+                        response = await client.post(
+                            self.base_url,
+                            headers=self._get_headers(),
+                            json=payload
+                        )
+                        print("FALLBACK STATUS:", response.status_code)
+                        print("FALLBACK BODY:", response.text)
+                        response.raise_for_status()
+                        data = response.json()
+                        choice = data["choices"][0]["message"]
+                        return {
+                            "text": choice.get("content") or "",
+                            "tool_calls": choice.get("tool_calls") or []
+                        }
+                    except Exception as fallback_err:
+                        print(f"[LLMProvider] Fallback error: {fallback_err}")
+                
+                print(f"[LLMProvider] API Error: {e} - falling back to mock response.")
                 return self._mock_fallback(model, messages)
 
     async def complete_stream(
@@ -147,6 +178,10 @@ class OpenRouterProvider(LLMProvider):
             "stream": True
         }
 
+        print("--- [LLMProvider Stream Request] ---")
+        print("URL:", self.base_url)
+        print("MODEL:", model)
+
         full_parts = []
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:
@@ -156,6 +191,10 @@ class OpenRouterProvider(LLMProvider):
                     headers=self._get_headers(),
                     json=payload
                 ) as response:
+                    print("STREAM STATUS:", response.status_code)
+                    if response.status_code != 200:
+                        await response.read()
+                        print("STREAM BODY (Error):", response.text)
                     response.raise_for_status()
                     async for line in response.aiter_lines():
                         if not line.strip():
@@ -174,8 +213,45 @@ class OpenRouterProvider(LLMProvider):
                             except:
                                 continue
             except Exception as e:
-                print(f"[OpenRouter] Streaming Error: {e}")
-                err_text = f"\n\n[OpenRouter Stream Error: {e}]"
+                # If error, try fallback model streaming
+                fallback_model = "meta/llama-3.1-8b-instruct" if "nvidia" in self.base_url else "meta-llama/llama-3.1-8b-instruct"
+                if model != fallback_model:
+                    print(f"[LLMProvider Stream] Error: {e}. Retrying stream with fallback model '{fallback_model}'...")
+                    payload["model"] = fallback_model
+                    try:
+                        async with client.stream(
+                            "POST",
+                            self.base_url,
+                            headers=self._get_headers(),
+                            json=payload
+                        ) as response:
+                            print("STREAM FALLBACK STATUS:", response.status_code)
+                            if response.status_code != 200:
+                                await response.read()
+                                print("STREAM FALLBACK BODY (Error):", response.text)
+                            response.raise_for_status()
+                            async for line in response.aiter_lines():
+                                if not line.strip():
+                                    continue
+                                if line.startswith("data: "):
+                                    data_str = line[6:].strip()
+                                    if data_str == "[DONE]":
+                                        break
+                                    try:
+                                        chunk_data = json.loads(data_str)
+                                        delta = chunk_data["choices"][0]["delta"]
+                                        content = delta.get("content") or ""
+                                        if content:
+                                            full_parts.append(content)
+                                            await queue.put(content)
+                                    except:
+                                        continue
+                            return "".join(full_parts)
+                    except Exception as fallback_err:
+                        print(f"[LLMProvider Stream] Fallback error: {fallback_err}")
+                
+                print(f"[LLMProvider] Streaming Error: {e}")
+                err_text = f"\n\n[LLMProvider Stream Error: {e}]"
                 await queue.put(err_text)
                 return err_text
 

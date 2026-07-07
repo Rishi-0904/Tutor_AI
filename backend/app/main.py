@@ -1,9 +1,13 @@
+import os
+import warnings
+warnings.filterwarnings("ignore")
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import chat, quiz, profile, ocr, roadmap, analytics
 from app.core.config import settings
 from contextlib import asynccontextmanager
-from app.services.llm_service import load_models
 import traceback
 from fastapi import Request
 from starlette.responses import JSONResponse
