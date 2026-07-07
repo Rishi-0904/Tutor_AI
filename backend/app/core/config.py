@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     
     llm_provider: str = "openrouter"
     openrouter_api_key: str = ""
+    nvidia_api_key: str = ""
     
     # Model Registry
     orchestrator_model: str = "meta-llama/llama-3.1-8b-instruct"

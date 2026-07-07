@@ -9,6 +9,7 @@ preventing hardcoupling to any single client SDK or provider.
 
 from __future__ import annotations
 
+import os
 import json
 import asyncio
 from abc import ABC, abstractmethod
@@ -356,6 +357,58 @@ class GeminiProvider(LLMProvider):
 
 
 # ─────────────────────────────────────────────────────────────
+# NVIDIA PROVIDER
+# ─────────────────────────────────────────────────────────────
+
+class NvidiaProvider(OpenRouterProvider):
+    """
+    NVIDIA API Client implementation using OpenAI compatible integrate endpoint.
+    """
+
+    def __init__(self, api_key: str):
+        super().__init__(api_key)
+        self.api_key = api_key or os.getenv("NVIDIA_API_KEY", "")
+        self.base_url = "https://integrate.api.nvidia.com/v1/chat/completions"
+
+    def _get_headers(self) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def _translate_model(self, model: str) -> str:
+        # Translate OpenRouter/standard model names to NVIDIA's NIM model names
+        if model.startswith("meta-llama/"):
+            return model.replace("meta-llama/", "meta/")
+        if "deepseek-r1" in model.lower():
+            return "deepseek-ai/deepseek-r1"
+        if model.startswith("deepseek/"):
+            return model.replace("deepseek/", "deepseek-ai/")
+        return model
+
+    async def complete(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        json_mode: bool = False,
+        tools: Optional[List[dict]] = None
+    ) -> Dict[str, Any]:
+        nvidia_model = self._translate_model(model)
+        print(f"[NvidiaProvider] Translated model '{model}' -> '{nvidia_model}'")
+        return await super().complete(nvidia_model, messages, json_mode, tools)
+
+    async def complete_stream(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        queue: asyncio.Queue
+    ) -> str:
+        nvidia_model = self._translate_model(model)
+        print(f"[NvidiaProvider Stream] Translated model '{model}' -> '{nvidia_model}'")
+        return await super().complete_stream(nvidia_model, messages, queue)
+
+
+# ─────────────────────────────────────────────────────────────
 # FACTORY INSTANTIATOR
 # ─────────────────────────────────────────────────────────────
 
@@ -367,5 +420,8 @@ def get_llm_provider() -> LLMProvider:
     
     if provider_name == "gemini":
         return GeminiProvider(api_key=settings.gemini_api_key)
+    
+    if provider_name == "nvidia":
+        return NvidiaProvider(api_key=settings.nvidia_api_key)
         
     return OpenRouterProvider(api_key=settings.openrouter_api_key)
