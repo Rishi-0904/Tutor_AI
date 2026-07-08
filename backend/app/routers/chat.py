@@ -159,7 +159,12 @@ async def chat_stream(
                 subject=subject,
                 history=history
             ):
-                yield f"data: {json.dumps({'content': chunk})}\n\n"
+                # Agent status events are prefixed with __STATUS__
+                if isinstance(chunk, str) and chunk.startswith("__STATUS__"):
+                    status_payload = chunk[len("__STATUS__"):]
+                    yield f"data: {json.dumps({'type': 'agent_status', 'data': json.loads(status_payload)})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'content': chunk})}\n\n"
             yield "data: [DONE]\n\n"
             
         except Exception as e:

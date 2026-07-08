@@ -24,5 +24,6 @@ class Settings(BaseSettings):
     visual_model: str = "meta-llama/llama-3.1-8b-instruct"
     quiz_model: str = "meta-llama/llama-3.1-8b-instruct"
     critic_model: str = "meta-llama/llama-3.1-8b-instruct"
+    max_tokens: int = 2048
 
 settings = Settings()

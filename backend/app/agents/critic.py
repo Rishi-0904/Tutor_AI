@@ -34,7 +34,7 @@ async def critic_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str
 
     # 1. Loop-breaker check
     loops = ctx.metadata.get("critic_loops", 0)
-    if loops >= 2:
+    if loops >= 1:
         print(f"[Critic] Max cycles reached ({loops}). Auto-approving response.")
         ctx.critic_feedback = CriticFeedback(
             approved=True,

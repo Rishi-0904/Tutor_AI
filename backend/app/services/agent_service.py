@@ -12,6 +12,7 @@ Streams responses through an asyncio.Queue to decouple execution from SSE output
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Annotated, Any, Dict, List, Sequence, Union, Optional
 from typing_extensions import TypedDict
 
@@ -46,6 +47,61 @@ class GraphState(TypedDict):
     context: Dict[str, Any]  # Serialized AgentContext dict
     research_output: Optional[Dict[str, Any]]
     visual_output: Optional[Dict[str, Any]]
+
+
+# ─────────────────────────────────────────────────────────────
+# AGENT STATUS EVENT HELPERS
+# ─────────────────────────────────────────────────────────────
+
+# Human-readable labels for each agent node
+AGENT_LABELS = {
+    "orchestrator": "🧠 Orchestrator",
+    "research": "🔍 Research",
+    "visual": "🎨 Visual",
+    "tutor": "📚 Tutor",
+    "critic": "🔎 Critic",
+    "quiz": "📝 Quiz",
+    "roadmap": "🗺️ Roadmap",
+    "teach_back": "🎓 Teach-Back",
+    "memory": "💾 Memory",
+    "composer": "✨ Composer",
+}
+
+
+def _make_status_wrapper(agent_name: str, node_fn):
+    """
+    Wraps a LangGraph node function to emit agent_status events
+    through the stream queue before and after execution.
+    """
+    async def wrapped(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, Any]:
+        queue = config.get("configurable", {}).get("stream_queue")
+
+        # Emit "running" status
+        if queue:
+            status_event = json.dumps({
+                "type": "agent_status",
+                "agent": agent_name,
+                "label": AGENT_LABELS.get(agent_name, agent_name),
+                "status": "running"
+            })
+            await queue.put(f"__STATUS__{status_event}")
+
+        # Execute the actual node
+        result = await node_fn(state, config)
+
+        # Emit "done" status
+        if queue:
+            status_event = json.dumps({
+                "type": "agent_status",
+                "agent": agent_name,
+                "label": AGENT_LABELS.get(agent_name, agent_name),
+                "status": "done"
+            })
+            await queue.put(f"__STATUS__{status_event}")
+
+        return result
+
+    return wrapped
 
 
 # ─────────────────────────────────────────────────────────────
@@ -108,17 +164,17 @@ def route_from_critic(state: GraphState) -> str:
 def build_tutor_graph():
     workflow = StateGraph(GraphState)
 
-    # 1. Add all native nodes
-    workflow.add_node("orchestrator", orchestrator_node)
-    workflow.add_node("research", research_node)
-    workflow.add_node("visual", visual_node)
-    workflow.add_node("tutor", tutor_node)
-    workflow.add_node("critic", critic_node)
-    workflow.add_node("quiz", quiz_node)
-    workflow.add_node("roadmap", roadmap_node)
-    workflow.add_node("teach_back", teach_back_node)
-    workflow.add_node("memory", memory_node)
-    workflow.add_node("composer", composer_node)
+    # 1. Add all native nodes (wrapped with status emitters)
+    workflow.add_node("orchestrator", _make_status_wrapper("orchestrator", orchestrator_node))
+    workflow.add_node("research", _make_status_wrapper("research", research_node))
+    workflow.add_node("visual", _make_status_wrapper("visual", visual_node))
+    workflow.add_node("tutor", _make_status_wrapper("tutor", tutor_node))
+    workflow.add_node("critic", _make_status_wrapper("critic", critic_node))
+    workflow.add_node("quiz", _make_status_wrapper("quiz", quiz_node))
+    workflow.add_node("roadmap", _make_status_wrapper("roadmap", roadmap_node))
+    workflow.add_node("teach_back", _make_status_wrapper("teach_back", teach_back_node))
+    workflow.add_node("memory", _make_status_wrapper("memory", memory_node))
+    workflow.add_node("composer", _make_status_wrapper("composer", composer_node))
 
     # 2. Configure Entry Point and Routing Edges
     workflow.set_entry_point("orchestrator")
@@ -186,6 +242,7 @@ async def run_agent_stream(
     Executes the compiled multi-agent LangGraph workflow and streams tokens.
 
     Streams from the shared queue populated dynamically by composer and tutor nodes.
+    Agent status events are prefixed with __STATUS__ and separated from content chunks.
     """
     # 1. Convert history to LangChain messages
     messages = []
@@ -235,3 +292,4 @@ async def run_agent_stream(
     # 6. Raise task exceptions if execution failed
     if task.done() and task.exception():
         raise task.exception()
+

@@ -100,6 +100,30 @@ def _format_scorecard(tb, subject: str) -> str:
     return scorecard
 
 
+def _clean_response(text: str) -> str:
+    """
+    Clean up the raw LLM response before delivery.
+    - Strips DeepSeek <think>...</think> reasoning tags
+    - Removes excessive blank lines
+    - Trims leading/trailing whitespace
+    """
+    import re
+    
+    # Strip DeepSeek reasoning blocks: <think>...</think>
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    
+    # Strip any remaining XML-like tags that aren't markdown
+    text = re.sub(r'<\/?think>', '', text)
+    
+    # Collapse 3+ consecutive newlines into 2
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    # Trim leading/trailing whitespace
+    text = text.strip()
+    
+    return text
+
+
 async def composer_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, Any]:
     """
     LangGraph node: Response Composer.
@@ -120,8 +144,9 @@ async def composer_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
 
     composed_parts = []
     
-    # 1. Start with the core tutor response
-    composed_parts.append(ctx.tutor_answer)
+    # 1. Start with the core tutor response (cleaned)
+    cleaned_answer = _clean_response(ctx.tutor_answer)
+    composed_parts.append(cleaned_answer)
 
     # 2. Append Visualization
     if ctx.visualization and ctx.visualization.viz_type:
@@ -156,7 +181,7 @@ async def composer_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
                 await queue.put(scorecard_markdown)
 
     # Combine into full output
-    final_response = "".join(composed_parts)
+    final_response = "\n".join(composed_parts)
     ctx.metadata["composed_response"] = final_response
 
     print(f"[Composer] Final response composed. Total length: {len(final_response)}")

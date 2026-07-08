@@ -59,7 +59,7 @@ export function useChat() {
     const tempUserId = `${Date.now()}_u`
     const tempAiId   = `${Date.now()}_ai`
     const userMsg = { id: tempUserId, role: 'user', content }
-    const aiMsg   = { id: tempAiId,   role: 'assistant', content: '', streaming: true }
+    const aiMsg   = { id: tempAiId,   role: 'assistant', content: '', streaming: true, agentSteps: [] }
 
     setMessages((prev) => [...prev, userMsg, aiMsg])
 
@@ -87,6 +87,7 @@ export function useChat() {
       const decoder = new TextDecoder('utf-8')
       let buffer    = ''
       let aiContent = ''
+      let agentSteps = []
 
       // Read stream until [DONE]
       while (true) {
@@ -106,7 +107,29 @@ export function useChat() {
           if (payload === '[DONE]') break
           try {
             const parsed = JSON.parse(payload)
-            if (parsed.content) {
+            
+            // Handle agent status events
+            if (parsed.type === 'agent_status' && parsed.data) {
+              const { agent, label, status } = parsed.data
+              
+              // Update or add agent step
+              const existingIdx = agentSteps.findIndex(s => s.agent === agent && s.status === 'running')
+              if (status === 'done' && existingIdx >= 0) {
+                agentSteps[existingIdx] = { ...agentSteps[existingIdx], status: 'done' }
+              } else if (status === 'running') {
+                agentSteps = [...agentSteps, { agent, label, status: 'running' }]
+              }
+              
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === tempAiId
+                    ? { ...m, agentSteps: [...agentSteps] }
+                    : m
+                )
+              )
+            }
+            // Handle content events
+            else if (parsed.content) {
               aiContent += parsed.content
               setMessages((prev) =>
                 prev.map((m) =>

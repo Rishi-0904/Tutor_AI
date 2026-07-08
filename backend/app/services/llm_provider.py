@@ -92,26 +92,28 @@ class OpenRouterProvider(LLMProvider):
         model: str,
         messages: List[Dict[str, str]],
         json_mode: bool = False,
-        tools: Optional[List[dict]] = None
+        tools: Optional[List[dict]] = None,
+        max_tokens: int = 0
     ) -> Dict[str, Any]:
         
         # If API key is dummy/missing, trigger mock answer directly to allow testing
         if not self.api_key or "dummy" in self.api_key:
             return self._mock_fallback(model, messages)
 
+        from app.core.config import settings
+        token_limit = max_tokens or settings.max_tokens
+
         payload = {
             "model": model,
             "messages": messages,
+            "max_tokens": token_limit,
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
         if tools:
             payload["tools"] = tools
 
-        print("--- [LLMProvider Request] ---")
-        print("URL:", self.base_url)
-        print("MODEL:", model)
-        print("PAYLOAD:", json.dumps(payload, indent=2)[:500] + "\n... (truncated)")
+        print(f"[LLMProvider] POST {self.base_url} model={model} max_tokens={token_limit}")
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:
@@ -120,8 +122,8 @@ class OpenRouterProvider(LLMProvider):
                     headers=self._get_headers(),
                     json=payload
                 )
-                print("STATUS:", response.status_code)
-                print("BODY:", response.text)
+                if response.status_code != 200:
+                    print(f"[LLMProvider] ERROR {response.status_code}: {response.text[:200]}")
                 response.raise_for_status()
                 data = response.json()
                 
@@ -143,8 +145,8 @@ class OpenRouterProvider(LLMProvider):
                             headers=self._get_headers(),
                             json=payload
                         )
-                        print("FALLBACK STATUS:", response.status_code)
-                        print("FALLBACK BODY:", response.text)
+                        if response.status_code != 200:
+                            print(f"[LLMProvider] FALLBACK ERROR {response.status_code}: {response.text[:200]}")
                         response.raise_for_status()
                         data = response.json()
                         choice = data["choices"][0]["message"]
@@ -172,15 +174,15 @@ class OpenRouterProvider(LLMProvider):
                 await asyncio.sleep(0.05)
             return mock_res
 
+        from app.core.config import settings
         payload = {
             "model": model,
             "messages": messages,
-            "stream": True
+            "stream": True,
+            "max_tokens": settings.max_tokens,
         }
 
-        print("--- [LLMProvider Stream Request] ---")
-        print("URL:", self.base_url)
-        print("MODEL:", model)
+        print(f"[LLMProvider Stream] POST {self.base_url} model={model} max_tokens={settings.max_tokens}")
 
         full_parts = []
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -191,10 +193,9 @@ class OpenRouterProvider(LLMProvider):
                     headers=self._get_headers(),
                     json=payload
                 ) as response:
-                    print("STREAM STATUS:", response.status_code)
                     if response.status_code != 200:
                         await response.read()
-                        print("STREAM BODY (Error):", response.text)
+                        print(f"[LLMProvider Stream] ERROR {response.status_code}: {response.text[:200]}")
                     response.raise_for_status()
                     async for line in response.aiter_lines():
                         if not line.strip():
@@ -225,10 +226,9 @@ class OpenRouterProvider(LLMProvider):
                             headers=self._get_headers(),
                             json=payload
                         ) as response:
-                            print("STREAM FALLBACK STATUS:", response.status_code)
                             if response.status_code != 200:
                                 await response.read()
-                                print("STREAM FALLBACK BODY (Error):", response.text)
+                                print(f"[LLMProvider Stream] FALLBACK ERROR {response.status_code}: {response.text[:200]}")
                             response.raise_for_status()
                             async for line in response.aiter_lines():
                                 if not line.strip():

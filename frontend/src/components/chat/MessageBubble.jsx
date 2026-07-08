@@ -4,6 +4,7 @@ import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import useAuthStore from '../../store/authStore'
 import VisualizerContainer from '../visualizer/VisualizerContainer'
+import AgentFlowBar from './AgentFlowBar'
 
 // Streaming cursor — blinks while AI is still generating
 const StreamingCursor = () => (
@@ -145,6 +146,11 @@ export default function MessageBubble({ message }) {
             alt="Uploaded question"
             className="max-w-xs rounded-2xl border border-white/10 object-contain bg-surface-700 shadow-lg"
           />
+        )}
+
+        {/* Agent Flow Status Bar */}
+        {!isUser && message.agentSteps?.length > 0 && (
+          <AgentFlowBar agentSteps={message.agentSteps} isStreaming={isStreaming} />
         )}
 
         {/* Text content */}
