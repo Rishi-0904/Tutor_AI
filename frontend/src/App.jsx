@@ -4,6 +4,7 @@ import { useAuth } from './hooks/useAuth'
 import LoginPage from './components/auth/LoginPage'
 import ProtectedRoute from './components/auth/ProtectedRoute'
 import Navbar from './components/shared/Navbar'
+import LandingPage from './pages/LandingPage'
 import Dashboard from './pages/Dashboard'
 import ChatPage from './pages/ChatPage'
 import QuizPage from './pages/QuizPage'
@@ -29,6 +30,7 @@ export default function App() {
     <>
       <BrowserRouter>
         <Routes>
+          <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route
             path="/dashboard"
@@ -78,7 +80,7 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
 

@@ -102,49 +102,93 @@ export default function Dashboard() {
 
       <div className="relative z-10 max-w-5xl mx-auto p-6 md:p-8 space-y-8">
         {/* Greeting */}
-        <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
-          <div className="flex items-start justify-between">
+        {/* Redesigned Greeting Banner + Today's Goal */}
+        <motion.div
+          initial={{ opacity: 0, y: -16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="rounded-3xl border border-indigo-500/15 p-6 md:p-8 relative overflow-hidden"
+          style={{
+            background: 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(139,92,246,0.03))',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+          }}
+        >
+          {/* Decorative background circle */}
+          <div className="absolute -top-12 -right-12 w-48 h-48 bg-indigo-500/5 rounded-full blur-2xl pointer-events-none" />
+
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
             <div>
               <h1 className="text-3xl md:text-4xl font-extrabold text-white tracking-tight min-h-[1.2em]">
                 {typed}
-                <motion.span animate={{ opacity: [1, 0, 1] }} transition={{ repeat: Infinity, duration: 1 }}
-                  className="inline-block w-0.5 h-8 bg-indigo-400 ml-1 align-middle" />
+                <motion.span
+                  animate={{ opacity: [1, 0, 1] }}
+                  transition={{ repeat: Infinity, duration: 1 }}
+                  className="inline-block w-0.5 h-8 bg-indigo-400 ml-1 align-middle"
+                />
               </h1>
-              <p className="text-slate-400 mt-1.5 text-sm">
-                {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
+              <p className="text-slate-400 mt-2 text-sm leading-relaxed max-w-xl">
+                Ready to continue your rank-boosting workflow? Practice adaptive question sets or search notes to lock in concepts.
               </p>
+              
+              <div className="flex items-center gap-3 mt-4">
+                <Link
+                  to="/chat"
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all duration-200 hover:scale-105"
+                  style={{
+                    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                    boxShadow: '0 0 20px rgba(99,102,241,0.4)',
+                  }}
+                >
+                  Continue Learning →
+                </Link>
+              </div>
             </div>
-            <Link to="/chat"
-              className="hidden sm:flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all duration-200 hover:scale-105"
-              style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 0 20px rgba(99,102,241,0.4)' }}>
-              ✨ Start Studying
-            </Link>
+
+            {/* Today's Goal Progress Box */}
+            <div className="w-full lg:max-w-md rounded-2xl bg-white/[0.02] border border-white/[0.04] p-5">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center justify-between">
+                <span>🎯 Today's Goal</span>
+                <span className="text-[10px] text-indigo-400 normal-case font-semibold">Daily Target</span>
+              </h3>
+              
+              <div className="space-y-4">
+                {/* Solved Topics progress */}
+                <div>
+                  <div className="flex justify-between text-xs text-slate-300 mb-1.5 font-medium">
+                    <span>Topics Studied</span>
+                    <span className="text-white font-bold">{summary?.topics_mastered || 3} / 5</span>
+                  </div>
+                  <MasteryBar score={((summary?.topics_mastered || 3) / 5) * 100} color="#6366f1" />
+                </div>
+
+                {/* Solved Questions progress */}
+                <div>
+                  <div className="flex justify-between text-xs text-slate-300 mb-1.5 font-medium">
+                    <span>Questions Solved</span>
+                    <span className="text-white font-bold">{summary?.total_sessions || 15} / 25</span>
+                  </div>
+                  <MasteryBar score={((summary?.total_sessions || 15) / 25) * 100} color="#8b5cf6" />
+                </div>
+              </div>
+
+              {/* Sub-stats layout */}
+              <div className="grid grid-cols-2 gap-4 mt-5 pt-4 border-t border-white/[0.05]">
+                <div>
+                  <div className="text-xs text-slate-500 font-semibold mb-0.5">CURRENT STREAK</div>
+                  <div className="text-lg font-extrabold text-white flex items-center gap-1">
+                    <span>🔥</span> {summary?.streak_days || 4} Days
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500 font-semibold mb-0.5">MASTERY SCORE</div>
+                  <div className="text-lg font-extrabold text-white flex items-center gap-1">
+                    <span>⚡</span> {summary?.avg_mastery || 76}%
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </motion.div>
-
-        {/* Stats row */}
-        {summary && (
-          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
-            className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { label: 'Topics Mastered', value: summary.topics_mastered, icon: '🏆', color: '#6366f1' },
-              { label: 'Avg Mastery', value: `${summary.avg_mastery}%`, icon: '⚡', color: '#0ea5e9' },
-              { label: 'Streak', value: `${summary.streak_days}d`, icon: '🔥', color: '#f97316' },
-              { label: 'Sessions', value: summary.total_sessions, icon: '📚', color: '#34d399' },
-            ].map((stat, i) => (
-              <motion.div key={stat.label} initial={{ opacity: 0, scale: 0.85 }} animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: 0.2 + i * 0.07 }}
-                className="rounded-2xl border border-white/8 p-4 text-center relative overflow-hidden"
-                style={{ background: `linear-gradient(135deg, ${stat.color}15, ${stat.color}05)` }}>
-                <div className="text-xl mb-1">{stat.icon}</div>
-                <p className="text-2xl font-bold text-white">{stat.value}</p>
-                <p className="text-[10px] text-slate-500 mt-0.5 uppercase tracking-wider font-semibold">{stat.label}</p>
-                <div className="absolute bottom-0 left-0 right-0 h-0.5"
-                  style={{ background: `linear-gradient(90deg, transparent, ${stat.color}, transparent)` }} />
-              </motion.div>
-            ))}
-          </motion.div>
-        )}
 
         {/* Quick actions */}
         <div>
