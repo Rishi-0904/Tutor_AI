@@ -56,8 +56,9 @@ async def process_pdf_background(pdf_id: str, pdf_bytes: bytes, user_id: str):
         for idx, chunk in enumerate(chunks):
             # Fetch embedding from Gemini API (768 dimensions)
             response = client.models.embed_content(
-                model="text-embedding-004",
-                contents=chunk
+                model="gemini-embedding-2",
+                contents=chunk,
+                config={"output_dimensionality": 768}
             )
             embedding_vector = response.embeddings[0].values
             

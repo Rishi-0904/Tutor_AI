@@ -144,6 +144,11 @@ async def tutor_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str,
         for tc in tool_calls:
             tool_name = tc["function"]["name"]
             tool_args = json.loads(tc["function"]["arguments"])
+            
+            # Auto-inject user_id if expected by the tool but not provided by LLM
+            if "user_id" not in tool_args:
+                tool_args["user_id"] = ctx.user_id
+                
             print(f"[TutorAgent] Executing tool: {tool_name}({tool_args})")
 
             try:

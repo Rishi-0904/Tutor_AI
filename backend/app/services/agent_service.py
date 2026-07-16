@@ -143,7 +143,7 @@ def route_from_critic(state: GraphState) -> str:
     Conditional routing edge from Critic.
 
     Directs back to Research/Tutor if revisions are required, or forwards
-    to Memory if approved.
+    to Composer if approved.
     """
     ctx = AgentContext(**state["context"])
     fb = ctx.critic_feedback
@@ -154,7 +154,7 @@ def route_from_critic(state: GraphState) -> str:
         if fb.action == "revise":
             return "tutor"
 
-    return "memory"
+    return "composer"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -207,18 +207,18 @@ def build_tutor_graph():
         {
             "research": "research",
             "tutor": "tutor",
-            "memory": "memory"
+            "composer": "composer"
         }
     )
 
-    # Standalone branches join directly to memory
-    workflow.add_edge("teach_back", "memory")
-    workflow.add_edge("quiz", "memory")
-    workflow.add_edge("roadmap", "memory")
+    # Standalone branches join directly to composer
+    workflow.add_edge("teach_back", "composer")
+    workflow.add_edge("quiz", "composer")
+    workflow.add_edge("roadmap", "composer")
 
-    # Final post-processing
-    workflow.add_edge("memory", "composer")
-    workflow.add_edge("composer", END)
+    # Final post-processing: Composer -> Memory -> END
+    workflow.add_edge("composer", "memory")
+    workflow.add_edge("memory", END)
 
     return workflow.compile()
 

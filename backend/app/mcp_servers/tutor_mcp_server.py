@@ -156,8 +156,9 @@ def search_pdf(query: str, user_id: str) -> Dict[str, Any]:
         # Generate query embedding vector
         client = google_genai.Client(api_key=api_key)
         emb_res = client.models.embed_content(
-            model="text-embedding-004",
-            contents=query
+            model="gemini-embedding-2",
+            contents=query,
+            config={"output_dimensionality": 768}
         )
         query_embedding = emb_res.embeddings[0].values
         

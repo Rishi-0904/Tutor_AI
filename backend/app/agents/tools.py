@@ -261,12 +261,11 @@ def _build_all_tools() -> List[ToolDefinition]:
         description="Generate adaptive MCQ questions targeting weak topics.",
         parameters={
             "properties": {
-                "user_id": {"type": "string", "description": "Student user ID"},
                 "subject": {"type": "string", "description": "Subject for the quiz"},
                 "num_questions": {"type": "integer", "description": "Number of questions to generate"},
                 "difficulty": {"type": "string", "description": "Difficulty level: easy, medium, or hard"},
             },
-            "required": ["user_id", "subject"],
+            "required": ["subject"],
         },
         fn=_quiz_generator_fn,
     ))
@@ -275,10 +274,9 @@ def _build_all_tools() -> List[ToolDefinition]:
         description="Evaluate the student's difficulty level from past quiz attempts.",
         parameters={
             "properties": {
-                "user_id": {"type": "string", "description": "Student user ID"},
                 "subject": {"type": "string", "description": "Subject to evaluate"},
             },
-            "required": ["user_id", "subject"],
+            "required": ["subject"],
         },
         fn=_difficulty_evaluator_fn,
     ))
@@ -289,10 +287,9 @@ def _build_all_tools() -> List[ToolDefinition]:
         description="Get the student's weakest topics in a subject for personalization.",
         parameters={
             "properties": {
-                "user_id": {"type": "string", "description": "Student user ID"},
                 "subject": {"type": "string", "description": "Subject to check"},
             },
-            "required": ["user_id", "subject"],
+            "required": ["subject"],
         },
         fn=_weak_topics_fn,
     ))
@@ -306,9 +303,8 @@ def _build_all_tools() -> List[ToolDefinition]:
         parameters={
             "properties": {
                 "query": {"type": "string", "description": "Search query for the student's documents"},
-                "user_id": {"type": "string", "description": "Student user ID"},
             },
-            "required": ["query", "user_id"],
+            "required": ["query"],
         },
         fn=_pdf_search_fn,
         is_async=True,
